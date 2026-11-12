@@ -1,0 +1,18 @@
+services:
+  app:
+    build: .
+    container_name: painel-de-estudos
+    # Porta presa a 127.0.0.1: só este PC acessa (SPEC D1)
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/app/data
+      # F5: google_client.json e google_token.json (fora do git e da imagem)
+      - ./secrets:/app/secrets
+    env_file:
+      - path: .env
+        required: false
+    # Permite chegar ao Ollama/LM Studio do Windows por host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

@@ -1,0 +1,27 @@
+# Dados reais e segredos ficam só no PC (CLAUDE.md)
+data/
+secrets/
+.env
+*.db
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Frontend
+node_modules
+frontend/dist/
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+
+# F0: texto das matérias e respostas brutas ficam só no PC
+eval/topics/*.txt
+eval/results/
+# Relatórios da F0 trazem resumos/questões gerados do material das matérias; versione só o escolhido com git add -f
+eval/RESULTS_*.md

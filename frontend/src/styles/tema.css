@@ -1,0 +1,42 @@
+/* Identidade do Painel de Estudos — só a família primary (DS v2.13, resposta ao pedido 01).
+   Gráficos: --chart-1 roxo, --chart-4 azul (reordenação exigida pelo DS). */
+
+:root {
+  --primary: #7c3aed;
+  --primary-hover: #6d28d9;
+  --primary-text: #7c3aed;
+  --ring: #7c3aed;
+  --accent: #f5f3ff;
+  --accent-foreground: #5b21b6;
+
+  --chart-1: #7c3aed;
+  --chart-4: #2563eb;
+}
+
+.dark {
+  --primary: #7c3aed;
+  --primary-hover: #6d28d9;
+  --primary-text: #a78bfa;
+  --ring: #a78bfa;
+  --accent: #2e1065;
+  --accent-foreground: #c4b5fd;
+
+  --chart-1: #a78bfa;
+  --chart-4: #60a5fa;
+}
+
+/* Exceção autorizada em 10/11/2026 — candidata à variante 'escuro neutro' da superfície Aplicação; pendente na governança do DS.
+   Exceção autorizada pelo dono do painel (registrada no pedido 02 ao DS):
+   modo escuro preto e cinza neutro, sem o azul-ardósia do DS, igual ao site de PDI.
+   A família primary (roxo) acima continua; cores de status continuam do DS. */
+.dark {
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #141414;
+  --secondary: #262626;
+  --muted: #1c1c1c;
+  --muted-foreground: #a3a3a3;
+  --border: #2e2e2e;
+  --input: #737373;
+  --input-background: #141414;
+}

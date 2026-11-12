@@ -1,0 +1,67 @@
+/* Tokens do padrão de design v2.13, superfície Aplicação (padrão do DS, sem alterações) */
+
+:root {
+  --background: #fafbfc;
+  --foreground: #1a1f2e;
+  --card: #ffffff;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-text: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9;
+  --muted: #f8fafc;
+  --muted-foreground: #64748b;
+  --accent: #eff6ff;
+  --accent-foreground: #1e40af;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --input-background: #ffffff;
+  --ring: #2563eb;
+
+  --success: #10b981;
+  --warning: #f59e0b;
+  --destructive: #ef4444;
+  --info: #3b82f6;
+  --success-text: #047857;
+  --warning-text: #b45309;
+  --destructive-text: #b91c1c;
+  --info-text: #1d4ed8;
+
+  --chart-1: #2563eb;
+  --chart-2: #047857;
+  --chart-3: #64748b;
+  --chart-4: #6d28d9;
+  --chart-5: #be185d;
+
+  --overlay-footer-height: 0px;
+  --toast-margin: 16px;
+}
+
+.dark {
+  --background: #0f1419;
+  --foreground: #f1f5f9;
+  --card: #1a1f2e;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-text: #60a5fa;
+  --secondary: #1e293b;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #1e3a8a;
+  --accent-foreground: #93c5fd;
+  --border: #334155;
+  --input: #334155;
+  --input-background: #1a1f2e;
+  --ring: #3b82f6;
+
+  --success-text: #34d399;
+  --warning-text: #fbbf24;
+  --destructive-text: #f87171;
+  --info-text: #60a5fa;
+
+  --chart-1: #60a5fa;
+  --chart-2: #34d399;
+  --chart-3: #64748b;
+  --chart-4: #a78bfa;
+  --chart-5: #f472b6;
+}
