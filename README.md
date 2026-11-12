@@ -1,20 +1,30 @@
 # Painel de Estudos
 
-Painel de estudos que roda no próprio PC, com um agente de estudos movido por um modelo de linguagem **local** (LM Studio ou Ollama). Nenhum dado sai da máquina: sem nuvem, sem login, sem LLM pago.
+Faço uma graduação EAD, e estudar um único tema me tomava de 3 a 6 horas: abrir o portal, assistir às videoaulas, tirar prints, copiar tudo para o Notion. Minha rotina só comporta um tema por dia. Mesmo assim, eu não sabia o quanto estava aprendendo de verdade, perdia o ritmo depois de umas semanas parado e não tinha, em lugar nenhum, uma visão única de provas, prazos e do quanto falta para me formar.
 
-> Esta é a **versão pública v1**, com **dados fictícios** (curso, disciplinas, provas e notas inventados). Ela só é atualizada depois de bastante uso real e de uma próxima versão do painel.
+Então decidi construir a ferramenta que eu precisava: um painel que roda no meu próprio PC, com um agente de estudos que transforma o conteúdo de cada tema em resumo e questões no estilo da prova, corrige as minhas respostas e agenda as revisões. A medida de sucesso que defini não é quantas horas eu estudei, e sim se eu aprendi: um tema só conta como **aprendido** quando eu acerto 70% ou mais na revisão de 7 dias.
+
+> Esta é a **versão pública v1**, com **dados fictícios** (curso, disciplinas, provas e notas inventados). A versão que eu uso no dia a dia fica privada, com os meus dados reais. Esta cópia só é atualizada depois de bastante uso e de uma próxima versão do painel.
 
 ![Painel no tema claro](docs/prints/painel-claro.png)
 
+## As decisões que guiaram o projeto
+
+- **Tudo local.** Minhas notas, minha agenda e o material das disciplinas não saem do meu PC. Por isso o agente usa um modelo de linguagem rodando na minha própria máquina (LM Studio ou Ollama): sem nuvem, sem login, sem pagar por IA.
+- **No PC, não no celular.** Aplicativo no celular me distrai; o painel abre no navegador do computador onde eu já estudo.
+- **Medir aprendizado, não tempo.** Cada tema ganha uma nota na primeira tentativa e revisões em 1, 7 e 21 dias.
+- **Escolher o modelo com dados, não com achismo.** Antes de definir qual modelo usar, testei quatro modelos locais com o mesmo material (detalhes abaixo).
+
 ## O que ele faz
 
-- **Painel do dia:** próxima prova com contagem regressiva, horas estudadas na semana, próxima ação sugerida e progresso de cada disciplina.
+- **Painel do dia:** próxima prova com contagem regressiva, horas estudadas na semana, a próxima ação sugerida (prova mais perto × menor progresso × revisões pendentes) e o progresso de cada disciplina.
 - **Cronômetro de estudo:** meta e alarme por tema, com som; cada pausa salva o trecho estudado.
-- **Agente de estudos local:** gera resumos e conjuntos de questões no estilo da prova a partir do texto do tema, corrige, mostra o percentual de acerto e guarda os erros para revisão.
+- **Agente de estudos:** a partir do texto do tema, gera resumo e questões no formato da prova, corrige, mostra o percentual de acerto e guarda os erros para revisar depois.
+- **Checklist do dia:** temas planejados e revisões que vencem hoje.
 - **Progresso do curso:** horas por componente (mínima, extensionistas, atividades complementares, optativa, estágio).
-- **Regras de avaliação como dados:** cada disciplina tem a sua regra (pesos, nota mínima, AV/AVS), sem `if` por disciplina no código.
+- **Regras de avaliação como dados:** cada disciplina tem a sua regra (pesos, nota mínima), sem `if` por disciplina no código.
 - **Integrações opcionais:**
-  - **Notion:** lê o texto do tema da página ligada e grava o resultado no fim da página (nunca apaga nada).
+  - **Notion:** lê o texto do tema direto da página onde eu já faço as minhas anotações e grava o resultado no fim dela (nunca apaga nada).
   - **Google Agenda:** cria as provas numa agenda própria do painel e só lê a principal (nunca apaga eventos).
 - **Tema claro e escuro**, layout para celular e acessibilidade conferida com axe-core.
 
@@ -32,18 +42,35 @@ Painel de estudos que roda no próprio PC, com um agente de estudos movido por u
 | --- | --- |
 | ![Progresso do curso](docs/prints/curso.png) | ![Configurações e integrações](docs/prints/integracoes.png) |
 
-## Como funciona
+## Como escolhi o modelo
+
+Rodei a mesma tarefa em quatro modelos locais, na minha GPU de 8 GB: 5 módulos reais de uma disciplina de segurança, 10 questões com 5 alternativas cada, um modelo carregado por vez.
+
+| Modelo | Tempo médio por conjunto | Seguiu o formato? | Minha nota |
+| --- | --- | --- | --- |
+| gemma-4-26b-a4b-qat | ~2 min 50 s | Sim | **5** |
+| gemma-4-12b-qat | ~4 min 20 s | Sim | 4 |
+| gemma-4-e4b | ~47 s | Não (um conjunto veio incompleto) | 4 |
+| qwen3.5-9b | ~70 s | Não (4 alternativas, resposta certa na letra A em 82% das vezes) | 3 |
+
+O teste mostrou problemas que eu não teria visto só usando: modelo devolvendo menos questões que o pedido e resposta certa quase sempre na mesma letra. Isso virou correção no painel: agora ele exige exatamente o número de questões e de alternativas pedido e embaralha as alternativas. Fiquei com o `gemma-4-26b-a4b-qat` como padrão. Resultado completo: [`docs/F0_RESULTADO.md`](docs/F0_RESULTADO.md).
+
+## Como foi construído
+
+Eu escrevi o [`SPEC.md`](SPEC.md) com o problema, as decisões e as fases (F0 a F7), e defini as regras do projeto no [`CLAUDE.md`](CLAUDE.md). O código foi desenvolvido com IA (Claude Code), fase por fase: cada mudança passou pela minha revisão e por testes antes de entrar, e eu usei o painel de verdade nos meus estudos para validar cada etapa.
 
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy, Alembic e SQLite (`./data/painel.db`).
-- **Frontend:** React, Vite, TypeScript e Tailwind v4, seguindo um padrão de design próprio (design system).
-- **Modelo:** qualquer servidor com API compatível com OpenAI (LM Studio `:1234/v1` ou Ollama `:11434/v1`). A lista de modelos vem do servidor. Toda chamada passa por um único cliente que valida o JSON com schema Pydantic, tenta de novo uma vez e registra modelo, versão do prompt, tokens e tempo.
+- **Frontend:** React, Vite, TypeScript e Tailwind v4, seguindo um padrão de design próprio.
+- **Modelo:** qualquer servidor com API compatível com OpenAI (LM Studio `:1234/v1` ou Ollama `:11434/v1`). Toda chamada passa por um único cliente que valida o JSON com schema Pydantic, tenta de novo uma vez e registra modelo, versão do prompt, tokens e tempo.
 - **Prompts versionados** em `backend/prompts/*.md`.
-- **Avaliação de modelos (F0):** `eval/run_eval.py` compara modelos locais no mesmo material; o resultado está em [`docs/F0_RESULTADO.md`](docs/F0_RESULTADO.md).
 
 ### Segurança e privacidade
 
+Antes de publicar esta versão, fiz uma auditoria de segurança com um roteiro próprio e um checklist de pré-publicação. O relatório está em [`docs/security-audit/`](docs/security-audit/).
+
 - Porta presa a `127.0.0.1`: só o próprio PC acessa.
-- Proteção contra DNS rebinding (lista de hosts aceitos), CSP restrita e cabeçalhos de segurança.
+- Proteção contra DNS rebinding, bloqueio de escrita vinda de outros sites, CSP restrita e cabeçalhos de segurança.
+- Container rodando sem root.
 - Ao modelo vai só o texto do tema e as questões; notas, nomes e agenda nunca são enviados.
 - Tokens só no `.env` e em `./secrets/`, os dois fora do git.
 
@@ -55,7 +82,7 @@ Requisitos: Docker Desktop e, para o agente, o LM Studio ou o Ollama com um mode
 docker compose up --build
 ```
 
-Abra `http://localhost:8000` (documentação da API em `http://localhost:8000/docs`). No primeiro início o container cria o banco, aplica as migrações e carrega os dados fictícios de demonstração. Para começar do zero, pare o container e apague `./data/painel.db`.
+Abra `http://localhost:8000` (documentação da API em `http://localhost:8000/docs`). No primeiro início o container cria o banco, aplica as migrações e carrega os dados fictícios de demonstração. Para começar do zero, pare o container e apague `./data/painel.db`. Depois é só trocar pelos seus dados em **Gerenciar**.
 
 Passo a passo para iniciantes, com prints: [`docs/GUIA.md`](docs/GUIA.md) (também em PDF: [`docs/guia/GUIA.pdf`](docs/guia/GUIA.pdf), e no app em Gerenciar → Como usar).
 
@@ -83,14 +110,9 @@ npm run dev   # encaminha /api para a porta 8000
 - `backend/prompts/` — prompts versionados do agente
 - `backend/tests/` — testes (pytest)
 - `frontend/` — interface React
-- `eval/` — avaliação de modelos locais (F0)
-- `docs/` — guia, prints e resultado da F0
-- [`SPEC.md`](SPEC.md) — escopo, decisões e fases · [`CLAUDE.md`](CLAUDE.md) — regras para quem programa
+- `eval/` — teste de modelos locais (F0)
+- `docs/` — guia, prints, resultado da F0 e auditoria de segurança
 
 ## Autor
 
-**Micael Fabri** ([@micaelfabri](https://github.com/micaelfabri)): concepção do produto, especificação ([`SPEC.md`](SPEC.md)), escolha da stack e da arquitetura, padrão de design, requisitos de segurança e privacidade, avaliação dos modelos locais e validação em uso real.
-
-O código foi desenvolvido com IA (Claude Code), sob direção e revisão do autor, seguindo o SPEC e as regras do projeto ([`CLAUDE.md`](CLAUDE.md)).
-
-Os dados de demonstração são fictícios: troque pelos seus em Gerenciar.
+**Micael Fabri** ([@micaelfabri](https://github.com/micaelfabri)): concepção do produto, especificação, escolha da stack e da arquitetura, padrão de design, requisitos de segurança e privacidade, teste dos modelos locais e validação em uso real.
