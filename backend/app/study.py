@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from . import learning, models
+from . import areas, learning, models
 from .db import get_session
 
 router = APIRouter(prefix="/api/study", tags=["estudo"])
@@ -185,7 +185,7 @@ class TimerStartIn(BaseModel):
 class TimerPatchIn(BaseModel):
     subject_id: int | None = None
     pauses: int | None = Field(default=None, ge=0, le=10_000)
-    # Finalizar ou Zerar: fecha a sessão com o relógio oculto (início até agora)
+    # Finalizar fecha a sessão com o relógio oculto (início até agora); "reset" = Zerar das sessões antigas
     end_reason: Literal["finished", "reset"] | None = None
     ended_at: datetime | None = None
     notes: str | None = Field(default=None, max_length=2000)
@@ -234,11 +234,26 @@ def update_timer_session(timer_id: int, data: TimerPatchIn, session: Session = D
     return _timer_out(session, t)
 
 
+@router.delete("/timer-sessions/{timer_id}", status_code=204)
+def cancel_timer_session(timer_id: int, session: Session = Depends(get_session)):
+    """v1.7.2: Cancelar no cronômetro descarta a sessão e os trechos dela (não contam nas horas)."""
+    t = session.get(models.TimerSession, timer_id)
+    if t is None:
+        raise HTTPException(404, "sessão do cronômetro não encontrada")
+    for chunk in session.scalars(select(models.StudySession)
+                                 .where(models.StudySession.timer_session_id == timer_id)).all():
+        session.delete(chunk)
+    session.delete(t)
+    session.commit()
+
+
 @router.get("/timer-sessions")
-def list_timer_sessions(limit: int = Query(30, le=200), session: Session = Depends(get_session)):
+def list_timer_sessions(limit: int = Query(30, le=1000), area: areas.Area | None = "faculdade",
+                        session: Session = Depends(get_session)):
     subjects = {s.id: s.name for s in session.scalars(select(models.Subject)).all()}
-    rows = session.scalars(select(models.TimerSession).order_by(models.TimerSession.started_at.desc())
-                           .limit(limit)).all()
+    course_ids = areas.course_subject_ids(session)
+    rows = session.scalars(select(models.TimerSession).order_by(models.TimerSession.started_at.desc())).all()
+    rows = [t for t in rows if areas.in_area(t.subject_id, area, course_ids)][:limit]
     return [_timer_out(session, t, subjects) for t in rows]
 
 
@@ -266,7 +281,7 @@ def _set_row(session: Session, qs: models.QuestionSet, topics: dict[int, models.
 
 @router.get("/history")
 def history(subject_id: int | None = None, topic_id: int | None = None, limit: int = Query(200, le=500),
-            session: Session = Depends(get_session)):
+            area: areas.Area | None = "faculdade", session: Session = Depends(get_session)):
     """Todos os conjuntos de questões, do mais novo para o mais antigo."""
     topics = {t.id: t for t in session.scalars(select(models.Topic)).all()}
     subjects = {s.id: s.name for s in session.scalars(select(models.Subject)).all()}
@@ -275,19 +290,24 @@ def history(subject_id: int | None = None, topic_id: int | None = None, limit: i
             .order_by(models.QuestionSet.created_at.desc(), models.QuestionSet.id.desc()))
     if topic_id is not None:
         stmt = stmt.where(models.QuestionSet.topic_id == topic_id)
-    rows = [_set_row(session, qs, topics, subjects) for qs in session.scalars(stmt.limit(limit)).all()]
+    course_ids = areas.course_subject_ids(session)
+    rows = [_set_row(session, qs, topics, subjects) for qs in session.scalars(stmt).all()]
+    rows = [r for r in rows if areas.in_area(r["subject_id"], area, course_ids)]
     if subject_id is not None:
         rows = [r for r in rows if r["subject_id"] == subject_id]
-    return rows
+    return rows[:limit]
 
 
 @router.get("/history/topics")
-def topic_evolution(session: Session = Depends(get_session)):
+def topic_evolution(area: areas.Area | None = "faculdade", session: Session = Depends(get_session)):
     """Evolução por tema: todas as notas concluídas em ordem, mais o status e os erros em aberto."""
     out = []
+    course_ids = areas.course_subject_ids(session)
     topics = session.scalars(select(models.Topic).options(selectinload(models.Topic.subject))
                              .order_by(models.Topic.subject_id, models.Topic.position)).all()
     for t in topics:
+        if not areas.in_area(t.subject_id, area, course_ids):
+            continue
         sets = session.scalars(select(models.QuestionSet)
                                .where(models.QuestionSet.topic_id == t.id, models.QuestionSet.completed_at.is_not(None))
                                .order_by(models.QuestionSet.completed_at)).all()
@@ -316,8 +336,10 @@ def week_summary(today: date | None = Query(None, description="Só para testes; 
     today = today or date.today()
     start = today - timedelta(days=today.weekday())  # segunda-feira
     begin, end = datetime.combine(start, time.min), datetime.combine(start + timedelta(days=7), time.min)
+    course_ids = areas.course_subject_ids(session)
     seconds = sum(r.seconds for r in session.scalars(select(models.StudySession).where(
-        models.StudySession.started_at >= begin, models.StudySession.started_at < end)).all())
+        models.StudySession.started_at >= begin, models.StudySession.started_at < end)).all()
+        if areas.in_area(r.subject_id, "faculdade", course_ids))
     sets = session.scalars(select(models.QuestionSet).where(
         models.QuestionSet.completed_at >= begin, models.QuestionSet.completed_at < end)).all()
     scores = [s.score for s in sets if s.score is not None]
@@ -369,7 +391,8 @@ def daily_backup(db_path: Path | None = None, today: date | None = None) -> Path
 # --- Métricas de desempenho (D25) --------------------------------------------
 
 
-def compute_metrics(session: Session, today: date, days: int = 30, subject_id: int | None = None) -> dict:
+def compute_metrics(session: Session, today: date, days: int = 30, subject_id: int | None = None,
+                    area: areas.Area = "faculdade") -> dict:
     """Números do dashboard de desempenho; o agente usa um resumo deles quando liberado.
 
     v1.5: `subject_id` filtra horas, testes e notas por disciplina (os gráficos interativos usam).
@@ -389,6 +412,10 @@ def compute_metrics(session: Session, today: date, days: int = 30, subject_id: i
     def set_subject(qs: models.QuestionSet) -> int | None:
         return topics[qs.topic_id].subject_id if qs.topic_id in topics else qs.subject_id
 
+    # v1.8 (D38): cada área tem os seus números
+    course_ids = areas.course_subject_ids(session)
+    chunks = [c for c in chunks if areas.in_area(c.subject_id, area, course_ids)]
+    sets = [qs for qs in sets if areas.in_area(set_subject(qs), area, course_ids)]
     if subject_id is not None:
         chunks = [c for c in chunks if c.subject_id == subject_id]
         sets = [qs for qs in sets if set_subject(qs) == subject_id]
@@ -414,7 +441,11 @@ def compute_metrics(session: Session, today: date, days: int = 30, subject_id: i
         streak += 1
         cursor -= timedelta(days=1)
 
-    current = [s for s in subjects.values() if s.semester and s.semester.is_current]
+    if area == "cursos":
+        # Módulos dos cursos em andamento
+        current = [s for s in subjects.values() if s.id in course_ids and s.degree.course_status == "doing"]
+    else:
+        current = [s for s in subjects.values() if s.semester and s.semester.is_current]
     by_subject = []
     for s in sorted(current, key=lambda x: x.name):
         s_sets = [qs for qs in sets if set_subject(qs) == s.id and qs.score is not None]
@@ -433,6 +464,7 @@ def compute_metrics(session: Session, today: date, days: int = 30, subject_id: i
     timers = session.scalars(select(models.TimerSession).where(
         models.TimerSession.started_at >= begin, models.TimerSession.started_at < end,
         models.TimerSession.end_reason.is_not(None))).all()
+    timers = [t for t in timers if areas.in_area(t.subject_id, area, course_ids)]
     if subject_id is not None:
         timers = [t for t in timers if t.subject_id == subject_id]
     wall = sum(t.wall_seconds or 0 for t in timers)
@@ -442,11 +474,15 @@ def compute_metrics(session: Session, today: date, days: int = 30, subject_id: i
     for d in session.scalars(select(models.Deadline).where(models.Deadline.score.is_not(None))).all():
         if subject_id is not None and d.subject_id != subject_id:
             continue
+        if not areas.in_area(d.subject_id, area, course_ids):
+            continue
         graded.append({"title": d.title, "kind": KIND_LABELS.get(d.kind, d.kind), "score": d.score,
                        "max_score": SCORE_SCALE.get(d.kind, 10.0),
                        "wrong_attempts": d.wrong_attempts, "date": d.due_date.isoformat()})
     for e in session.scalars(select(models.Exam).where(models.Exam.score.is_not(None))).all():
         if subject_id is not None and e.subject_id != subject_id:
+            continue
+        if not areas.in_area(e.subject_id, area, course_ids):
             continue
         when = e.scheduled_at.date() if e.scheduled_at else e.schedule_by
         graded.append({"title": f"{e.kind} · {subjects[e.subject_id].name}", "kind": "Prova", "score": e.score,
@@ -454,9 +490,9 @@ def compute_metrics(session: Session, today: date, days: int = 30, subject_id: i
 
     all_scores = [qs.score for qs in sets if qs.score is not None]
     # v1.6 (D37): cards revisados por dia (filtrados pela disciplina, se houver)
-    card_days = _card_reviews_by_day(session, begin, end, subject_id)
+    card_days = _card_reviews_by_day(session, begin, end, subject_id, area, course_ids)
     return {
-        "start": start.isoformat(), "end": today.isoformat(), "days": days, "subject_id": subject_id,
+        "start": start.isoformat(), "end": today.isoformat(), "days": days, "subject_id": subject_id, "area": area,
         "totals": {
             "seconds": sum(v["seconds"] for v in daily.values()), "sets": len(sets),
             "questions": answered, "accuracy": right / answered if answered else None,
@@ -488,14 +524,17 @@ def compute_metrics(session: Session, today: date, days: int = 30, subject_id: i
     }
 
 
-def _card_reviews_by_day(session: Session, begin: datetime, end: datetime, subject_id: int | None) -> dict[str, int]:
-    stmt = (select(models.CardReview.created_at).join(models.Card, models.Card.id == models.CardReview.card_id)
+def _card_reviews_by_day(session: Session, begin: datetime, end: datetime, subject_id: int | None,
+                         area: areas.Area | None = None, course_ids: set[int] | None = None) -> dict[str, int]:
+    stmt = (select(models.CardReview.created_at, models.Topic.subject_id).join(models.Card, models.Card.id == models.CardReview.card_id)
             .join(models.Topic, models.Topic.id == models.Card.topic_id)
             .where(models.CardReview.created_at >= begin, models.CardReview.created_at < end))
     if subject_id is not None:
         stmt = stmt.where(models.Topic.subject_id == subject_id)
     out: dict[str, int] = {}
-    for at in session.scalars(stmt).all():
+    for at, sid in session.execute(stmt).all():
+        if not areas.in_area(sid, area, course_ids or set()):
+            continue
         out[at.date().isoformat()] = out.get(at.date().isoformat(), 0) + 1
     return out
 
@@ -505,15 +544,17 @@ def _mistake_fields(c: dict) -> dict:
 
 
 @router.get("/metrics")
-def metrics(days: int = Query(30, ge=7, le=180), subject_id: int | None = None,
+def metrics(days: int = Query(30, ge=7, le=180), subject_id: int | None = None, area: areas.Area = "faculdade",
             today: date | None = Query(None, description="Só para testes"),
             session: Session = Depends(get_session)):
-    return compute_metrics(session, today or date.today(), days, subject_id)
+    return compute_metrics(session, today or date.today(), days, subject_id, area)
 
 
 @router.get("/day")
-def day_detail(day: date, subject_id: int | None = None, session: Session = Depends(get_session)):
-    """v1.5: o que foi feito num dia (clique na barra do gráfico de horas): trechos do cronômetro e testes."""
+def day_detail(day: date, subject_id: int | None = None, area: areas.Area | None = "faculdade",
+               session: Session = Depends(get_session)):
+    """v1.5: o que foi feito num dia (clique na barra do gráfico de horas): trechos do cronômetro, testes e
+    (v1.7.2) as tarefas do checklist daquele dia."""
     begin, end = datetime.combine(day, time.min), datetime.combine(day + timedelta(days=1), time.min)
     subjects = {s.id: s.name for s in session.scalars(select(models.Subject)).all()}
     topics = {t.id: t for t in session.scalars(select(models.Topic)).all()}
@@ -521,17 +562,29 @@ def day_detail(day: date, subject_id: int | None = None, session: Session = Depe
                                             models.StudySession.started_at < end)
     if subject_id is not None:
         stmt = stmt.where(models.StudySession.subject_id == subject_id)
-    chunks = session.scalars(stmt.order_by(models.StudySession.started_at)).all()
+    course_ids = areas.course_subject_ids(session)
+    chunks = [c for c in session.scalars(stmt.order_by(models.StudySession.started_at)).all()
+              if areas.in_area(c.subject_id, area, course_ids)]
     sets = session.scalars(select(models.QuestionSet)
                            .options(selectinload(models.QuestionSet.questions).selectinload(models.Question.answer))
                            .where(models.QuestionSet.completed_at >= begin, models.QuestionSet.completed_at < end)
                            .order_by(models.QuestionSet.completed_at)).all()
-    rows = [_set_row(session, qs, topics, subjects) for qs in sets]
+    rows = [r for r in (_set_row(session, qs, topics, subjects) for qs in sets)
+            if areas.in_area(r["subject_id"], area, course_ids)]
     if subject_id is not None:
         rows = [r for r in rows if r["subject_id"] == subject_id]
+    # v1.7.2: as tarefas do checklist ficam salvas com o dia; aqui elas aparecem de novo, feitas ou não
+    items = session.scalars(select(models.ChecklistItem).where(models.ChecklistItem.day == day)
+                            .order_by(models.ChecklistItem.position, models.ChecklistItem.id)).all()
+    # Tarefa ligada a um tema fica na área do tema; tarefa solta fica na faculdade
+    items = [i for i in items if areas.in_area(topics[i.topic_id].subject_id if topics.get(i.topic_id) else None,
+                                               area, course_ids)]
+    if subject_id is not None:
+        items = [i for i in items if i.topic_id and topics.get(i.topic_id) and topics[i.topic_id].subject_id == subject_id]
     return {
         "date": day.isoformat(),
         "seconds": sum(c.seconds for c in chunks),
+        "tasks": [{"id": i.id, "label": i.label, "done": i.done, "planned_minutes": i.planned_minutes} for i in items],
         "chunks": [{"started_at": c.started_at.isoformat(), "ended_at": c.ended_at.isoformat() if c.ended_at else None,
                     "seconds": c.seconds, "subject_name": subjects.get(c.subject_id) if c.subject_id else None}
                    for c in chunks],

@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import learning, models
+from . import areas, learning, models
 from .agent import prompts
 from .agent.client import LLMClient, LLMError
 from .agent.router import MAX_TEXT, _llm_http_error, get_client
@@ -57,7 +57,7 @@ def _last_score(session: Session, topic_id: int) -> float | None:
 
 
 def weak_topics(session: Session, today: date, subject_id: int | None = None,
-                topic_id: int | None = None) -> list[dict]:
+                topic_id: int | None = None, area: areas.Area | None = None) -> list[dict]:
     """Temas em ordem de fraqueza, com os erros que ainda não viraram card."""
     covered = set(session.scalars(select(models.Card.mistake_id).where(models.Card.mistake_id.is_not(None))).all())
     stmt = select(models.Topic)
@@ -67,7 +67,10 @@ def weak_topics(session: Session, today: date, subject_id: int | None = None,
         stmt = stmt.where(models.Topic.subject_id == subject_id)
     out = []
     exams: dict[int, date | None] = {}
+    course_ids = areas.course_subject_ids(session)
     for t in session.scalars(stmt).all():
+        if topic_id is None and not areas.in_area(t.subject_id, area, course_ids):
+            continue
         mistakes = session.scalars(select(models.Mistake).where(
             models.Mistake.topic_id == t.id, models.Mistake.status.in_(learning.UNFIXED))).all()
         open_ = [m for m in mistakes if m.id not in covered]
@@ -278,6 +281,7 @@ def review(card_id: int, data: ReviewIn, today: date | None = Query(None, descri
 
 class GenerateIn(BaseModel):
     scope: Literal["weak", "subject", "topic"] = "weak"
+    area: areas.Area = "faculdade"
     subject_id: int | None = None
     topic_id: int | None = None
     n: int = Field(default=DEFAULT_CARDS, ge=3, le=20)
@@ -294,7 +298,7 @@ def generate(data: GenerateIn, today: date | None = Query(None), session: Sessio
     if data.scope == "subject" and data.subject_id is None:
         raise HTTPException(422, "Escolha a disciplina.")
     ranked = weak_topics(session, today, subject_id=data.subject_id if data.scope == "subject" else None,
-                         topic_id=data.topic_id if data.scope == "topic" else None)
+                         topic_id=data.topic_id if data.scope == "topic" else None, area=data.area)
     if not ranked:
         raise HTTPException(409, "Nenhum ponto fraco com material para virar card. Faça um teste antes.")
     first = ranked[0]
@@ -308,7 +312,7 @@ def generate(data: GenerateIn, today: date | None = Query(None), session: Sessio
 @router.get("")
 def list_cards(topic_id: int | None = None, subject_id: int | None = None, due: bool = False,
                limit: int = Query(50, ge=1, le=500), today: date | None = Query(None),
-               session: Session = Depends(get_session)):
+               area: areas.Area | None = None, session: Session = Depends(get_session)):
     today = today or date.today()
     stmt = select(models.Card).join(models.Topic, models.Topic.id == models.Card.topic_id)
     if topic_id is not None:
@@ -317,17 +321,25 @@ def list_cards(topic_id: int | None = None, subject_id: int | None = None, due: 
         stmt = stmt.where(models.Topic.subject_id == subject_id)
     if due:
         stmt = stmt.where(models.Card.next_review <= today)
+    if area is not None:
+        ids = areas.course_subject_ids(session)
+        stmt = stmt.where(models.Topic.subject_id.in_(ids) if area == "cursos" else models.Topic.subject_id.not_in(ids))
     rows = session.scalars(stmt.order_by(models.Card.next_review, models.Card.step, models.Card.id).limit(limit)).all()
     return [card_out(session, c, today) for c in rows]
 
 
 @router.get("/summary")
-def summary(today: date | None = Query(None), session: Session = Depends(get_session)):
+def summary(today: date | None = Query(None), area: areas.Area | None = "faculdade",
+            session: Session = Depends(get_session)):
     """Uma linha por tema: total de cards, vencidos hoje e quantos acertei na última revisão."""
     today = today or date.today()
     out = []
     by_topic: dict[int, dict] = {}
+    course_ids = areas.course_subject_ids(session)
+    topic_subject = areas.topic_subjects(session)
     for c in session.scalars(select(models.Card)).all():
+        if not areas.in_area(topic_subject.get(c.topic_id), area, course_ids):
+            continue
         row = by_topic.setdefault(c.topic_id, {"total": 0, "due": 0})
         row["total"] += 1
         row["due"] += 1 if c.next_review <= today else 0
@@ -345,6 +357,7 @@ def summary(today: date | None = Query(None), session: Session = Depends(get_ses
 
 class RoundIn(BaseModel):
     subject_id: int | None = None
+    area: areas.Area = "faculdade"
     size: int = Field(default=10, ge=3, le=30)
 
 
@@ -355,6 +368,8 @@ def quick_round(data: RoundIn, today: date | None = Query(None), session: Sessio
     stmt = select(models.Card).join(models.Topic, models.Topic.id == models.Card.topic_id)
     if data.subject_id is not None:
         stmt = stmt.where(models.Topic.subject_id == data.subject_id)
+    ids = areas.course_subject_ids(session)
+    stmt = stmt.where(models.Topic.subject_id.in_(ids) if data.area == "cursos" else models.Topic.subject_id.not_in(ids))
     cards = session.scalars(stmt).all()
     if not cards:
         raise HTTPException(409, "Ainda não há cards. Gere cards antes.")
@@ -373,7 +388,10 @@ def card_of_day(session: Session, today: date) -> models.Card | None:
     chosen = session.scalars(select(models.Card).where(models.Card.day_card_on == today)).first()
     if chosen:
         return chosen
-    cards = session.scalars(select(models.Card)).all()
+    # Card do dia vem da faculdade (fica no Painel)
+    ids = areas.course_subject_ids(session)
+    cards = session.scalars(select(models.Card).join(models.Topic, models.Topic.id == models.Card.topic_id)
+                            .where(models.Topic.subject_id.not_in(ids))).all()
     if not cards:
         return None
     exams: dict[int, date | None] = {}
@@ -590,5 +608,10 @@ def export_notion(topic_id: int, request: Request, session: Session = Depends(ge
     return {"sent": len(cards)}
 
 
-def due_count(session: Session, today: date) -> int:
-    return session.scalar(select(func.count(models.Card.id)).where(models.Card.next_review <= today)) or 0
+def due_count(session: Session, today: date, area: areas.Area | None = None) -> int:
+    stmt = select(func.count(models.Card.id)).where(models.Card.next_review <= today)
+    if area is not None:
+        ids = areas.course_subject_ids(session)
+        stmt = stmt.join(models.Topic, models.Topic.id == models.Card.topic_id).where(
+            models.Topic.subject_id.in_(ids) if area == "cursos" else models.Topic.subject_id.not_in(ids))
+    return session.scalar(stmt) or 0

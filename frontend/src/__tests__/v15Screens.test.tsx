@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { HoursChart, ScoresChart } from "@/components/performance/Charts";
@@ -45,7 +46,12 @@ test("Revisar erros: status com badge de status, não respondida e refazer (D28)
     ),
   );
   patch.mockResolvedValue({});
-  render(<ReviewMistakes onClose={() => {}} />);
+  // v1.8: a área vem da rota (faculdade aqui)
+  render(
+    <MemoryRouter initialEntries={["/estudo"]}>
+      <ReviewMistakes onClose={() => {}} />
+    </MemoryRouter>,
+  );
   expect(await screen.findByText("1 não revisado · 1 para revisar de novo · 3 corrigidos")).toBeTruthy();
   const badge = screen.getByText("Não revisado");
   expect(badge.className).toContain("rounded-full");

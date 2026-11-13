@@ -44,3 +44,14 @@ def test_acc_activity_validation(seeded):
     degree_id = seeded.get("/api/degrees").json()[0]["id"]
     r = seeded.post("/api/acc-activities", json={"degree_id": degree_id, "title": "x", "hours": 0})
     assert r.status_code == 422
+
+
+def test_acc_activity_delete_updates_total(seeded):
+    """v1.7.2: excluir uma atividade tira as horas dela do total de ACC."""
+    degree_id = seeded.get("/api/degrees").json()[0]["id"]
+    before = seeded.get("/api/course/progress").json()["acc"]["counted_hours"]
+    item = seeded.post("/api/acc-activities", json={"degree_id": degree_id, "title": "Minicurso", "hours": 10}).json()
+    assert seeded.get("/api/course/progress").json()["acc"]["counted_hours"] == before + 10
+    assert seeded.delete(f"/api/acc-activities/{item['id']}").status_code == 204
+    assert seeded.get("/api/course/progress").json()["acc"]["counted_hours"] == before
+    assert seeded.delete(f"/api/acc-activities/{item['id']}").status_code == 404

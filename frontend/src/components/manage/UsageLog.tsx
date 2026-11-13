@@ -37,9 +37,18 @@ interface UsagePage {
 export function UsageLog() {
   const [page, setPage] = React.useState(1);
   const calls = useApi<UsagePage>(`/agent/usage?page=${page}&per_page=10`);
+  const heading = React.useRef<HTMLHeadingElement>(null);
+  // Resposta 06 do DS: ao trocar de página, o foco vai para o início da lista
+  const goTo = (p: number) => {
+    setPage(p);
+    requestAnimationFrame(() => {
+      heading.current?.focus({ preventScroll: true });
+      heading.current?.scrollIntoView?.({ block: "start" });
+    });
+  };
   return (
     <section aria-labelledby="h-uso" className="space-y-3">
-      <h2 id="h-uso" className="text-lg font-semibold">
+      <h2 id="h-uso" ref={heading} tabIndex={-1} className="scroll-mt-20 text-lg font-semibold focus:outline-none">
         Registro de uso do modelo
       </h2>
       <RecordList
@@ -72,7 +81,7 @@ export function UsageLog() {
           page={calls.data.page}
           pages={calls.data.pages}
           total={calls.data.total}
-          onPage={setPage}
+          onPage={goTo}
           label="Páginas do registro de uso"
         />
       )}

@@ -6,7 +6,8 @@ import { useAgent } from "@/components/agent/AgentContext";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { api, type CardReviewResult, type CardView } from "@/lib/api";
+import { api, type Area, type CardReviewResult, type CardView } from "@/lib/api";
+import { useArea } from "@/lib/area";
 import { CardReview } from "./CardReview";
 
 /** Tempo da rodada: "4 min 12 s" (a rodada costuma durar poucos minutos) */
@@ -17,9 +18,13 @@ function roundTime(seconds: number) {
 }
 
 /** Abre uma rodada rápida (D37): até 10 cards dos pontos fracos, vencidos primeiro */
-export async function startRound(openCards: ReturnType<typeof useAgent>["openCards"], subjectId?: number | null) {
+export async function startRound(
+  openCards: ReturnType<typeof useAgent>["openCards"],
+  subjectId?: number | null,
+  area: Area = "faculdade",
+) {
   try {
-    const cards = await api.post<CardView[]>("/cards/round", { size: 10, subject_id: subjectId ?? null });
+    const cards = await api.post<CardView[]>("/cards/round", { size: 10, subject_id: subjectId ?? null, area });
     openCards({ title: "Rodada rápida", cards, round: true });
     return true;
   } catch (err) {
@@ -33,9 +38,10 @@ export async function startDue(
   openCards: ReturnType<typeof useAgent>["openCards"],
   topicId?: number,
   title = "Cards para revisar",
+  area: Area = "faculdade",
 ) {
   try {
-    const query = topicId ? `topic_id=${topicId}&due=true` : "due=true";
+    const query = topicId ? `topic_id=${topicId}&due=true` : `due=true&area=${area}`;
     let cards = await api.get<CardView[]>(`/cards?${query}&limit=30`);
     if (cards.length === 0 && topicId) cards = await api.get<CardView[]>(`/cards?topic_id=${topicId}&limit=30`);
     if (cards.length === 0) {
@@ -53,6 +59,8 @@ export async function startDue(
 /** Sessão de cards no painel do agente: um por vez; na rodada rápida, tempo, sequência e resultado */
 export function CardSessionView() {
   const { cardSession, closeCards, openCards, bumpLearning } = useAgent();
+  // v1.8: "Nova rodada" fica na área da página aberta (faculdade ou cursos)
+  const area = useArea();
   const [index, setIndex] = React.useState(0);
   const [results, setResults] = React.useState<{ card: CardView; knew: boolean }[]>([]);
   const [startedAt] = React.useState(() => Date.now());
@@ -97,7 +105,7 @@ export function CardSessionView() {
       </div>
       {round && !done && results.length > 0 && (
         <p className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
-          <Flame className="h-4 w-4 text-warning-text" aria-hidden="true" />
+          <Flame className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           {right} de {results.length} · sequência de {current}
         </p>
       )}
@@ -121,7 +129,7 @@ export function CardSessionView() {
           </p>
           {round && (
             <p className="flex items-center gap-2 text-sm">
-              <Flame className="h-4 w-4 text-warning-text" aria-hidden="true" />
+              <Flame className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               Maior sequência: {best} seguido{best === 1 ? "" : "s"}
             </p>
           )}
@@ -140,7 +148,7 @@ export function CardSessionView() {
             </div>
           )}
           <div className="flex flex-wrap gap-2">
-            {round && <Button onClick={() => void startRound(openCards)}>Nova rodada</Button>}
+            {round && <Button onClick={() => void startRound(openCards, null, area)}>Nova rodada</Button>}
             <Button variant={round ? "ghost" : "default"} onClick={closeCards}>
               Fechar
             </Button>

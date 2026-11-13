@@ -8,11 +8,14 @@ import { mistakeSummary } from "@/lib/mistakes";
 import { RecordList } from "@/components/manage/RecordList";
 import { CategoryBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import { Card } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Select } from "@/components/ui/select";
-import { type HistorySet, type Overview, type SettingsResponse, type TopicEvolution } from "@/lib/api";
+import { type HistorySet, type SettingsResponse, type TopicEvolution, type Area } from "@/lib/api";
 import { formatDayMonth, formatTime, parseLocalDate, parseLocalDateTime } from "@/lib/format";
+import { usePaged } from "@/lib/usePaged";
+import { AREA_TEXT, useAreaSubjects } from "@/lib/area";
 import { useApi } from "@/lib/useApi";
 import { cn } from "@/lib/utils";
 
@@ -30,13 +33,17 @@ function setWhen(s: HistorySet) {
   return d ? `${formatDayMonth(d)} ${formatTime(d)}` : "—";
 }
 
-/** Estudo › Histórico (SPEC D15, D16): tudo o que já fiz fica salvo, com refazer e novos testes */
-export function HistoryPage() {
+/**
+ * Estudo › Histórico (SPEC D15, D16): tudo o que já fiz fica salvo, com refazer e novos testes.
+ * v1.8 (D38): a mesma página serve a faculdade e os cursos (`area`).
+ */
+export function HistoryPage({ area = "faculdade" }: { area?: Area }) {
   const { startSet, openSet, learningVersion, pending, openCards } = useAgent();
   const [subjectFilter, setSubjectFilter] = React.useState("all");
-  const sets = useApi<HistorySet[]>("/study/history");
-  const topics = useApi<TopicEvolution[]>("/study/history/topics");
-  const overview = useApi<Overview>("/overview");
+  const sets = useApi<HistorySet[]>(`/study/history?limit=500&area=${area}`);
+  const topics = useApi<TopicEvolution[]>(`/study/history/topics?area=${area}`);
+  const text = AREA_TEXT[area];
+  const areaSubjects = useAreaSubjects(area);
   const settings = useApi<SettingsResponse>("/settings");
   const [simSubject, setSimSubject] = React.useState("");
 
@@ -47,13 +54,17 @@ export function HistoryPage() {
   }, [learningVersion]);
 
   const nOptions = Number(settings.data?.values.options_per_question ?? 5) || 5;
-  const subjects = overview.data?.subjects ?? [];
+  const subjects = areaSubjects;
   const filterOptions = [
-    { value: "all", label: "Todas as disciplinas" },
+    { value: "all", label: text.allSubjects },
     ...subjects.map((s) => ({ value: String(s.id), label: s.name })),
   ];
   const byFilter = <T extends { subject_id: number | null }>(rows: T[]) =>
     subjectFilter === "all" ? rows : rows.filter((r) => String(r.subject_id) === subjectFilter);
+
+  // v1.7.2: 10 por página nas duas listas; a página volta para 1 ao trocar a disciplina
+  const topicPages = usePaged(byFilter(topics.data ?? []), subjectFilter);
+  const setPages = usePaged(byFilter(sets.data ?? []), subjectFilter);
 
   const open = async (id: number) => {
     try {
@@ -70,14 +81,14 @@ export function HistoryPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Histórico</h1>
+          <h1 className="text-2xl font-semibold">{area === "cursos" ? "Histórico dos cursos" : "Histórico"}</h1>
           <p className="text-sm text-muted-foreground">
             Todos os testes ficam salvos aqui. Refaça as erradas ou peça um teste novo com base nos erros ou nos
             acertos.
           </p>
         </div>
         <div className="w-full sm:w-64">
-          <Field id="h-filter" label="Disciplina">
+          <Field id="h-filter" label={text.subject}>
             {() => (
               <Select id="h-filter" value={subjectFilter} onValueChange={setSubjectFilter} options={filterOptions} />
             )}
@@ -96,7 +107,7 @@ export function HistoryPage() {
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-full sm:w-72">
-            <Field id="sim-subject" label="Disciplina do simulado">
+            <Field id="sim-subject" label={`${text.subject} do simulado`}>
               {() => (
                 <Select
                   id="sim-subject"
@@ -130,7 +141,12 @@ export function HistoryPage() {
 
       <section className="space-y-3" aria-labelledby="h-temas">
         <div className="space-y-1">
-          <h2 id="h-temas" className="text-lg font-semibold">
+          <h2
+            id="h-temas"
+            ref={topicPages.anchor as React.RefObject<HTMLHeadingElement>}
+            tabIndex={-1}
+            className="scroll-mt-20 text-lg font-semibold focus:outline-none"
+          >
             Evolução por tema
           </h2>
           <p className="text-sm text-muted-foreground">
@@ -144,7 +160,7 @@ export function HistoryPage() {
           </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            {byFilter(topics.data ?? []).map((t) => (
+            {topicPages.slice.map((t) => (
               <Card key={t.topic_id} className="space-y-3 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -256,15 +272,27 @@ export function HistoryPage() {
             ))}
           </div>
         )}
+        <Pagination
+          page={topicPages.page}
+          pages={topicPages.pages}
+          total={topicPages.total}
+          onPage={topicPages.goTo}
+          label="Páginas da evolução por tema"
+        />
       </section>
 
       <section className="space-y-3" aria-labelledby="h-testes">
-        <h2 id="h-testes" className="text-lg font-semibold">
+        <h2
+          id="h-testes"
+          ref={setPages.anchor as React.RefObject<HTMLHeadingElement>}
+          tabIndex={-1}
+          className="scroll-mt-20 text-lg font-semibold focus:outline-none"
+        >
           Todos os testes
         </h2>
         <RecordList
           caption="Todos os testes"
-          rows={byFilter(sets.data ?? [])}
+          rows={setPages.slice}
           rowKey={(s) => s.id}
           title={(s) => s.topic_title}
           empty="Nenhum teste ainda. Gere questões no painel do agente."
@@ -308,6 +336,13 @@ export function HistoryPage() {
               )}
             </div>
           )}
+        />
+        <Pagination
+          page={setPages.page}
+          pages={setPages.pages}
+          total={setPages.total}
+          onPage={setPages.goTo}
+          label="Páginas de todos os testes"
         />
       </section>
     </div>

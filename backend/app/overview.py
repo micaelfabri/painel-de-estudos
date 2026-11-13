@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from . import cards, grading, learning, models, settings_store, study
+from . import areas, cards, grading, learning, models, settings_store, study
 from .db import get_session
 
 log = logging.getLogger("painel.overview")
@@ -137,7 +137,8 @@ def next_action(subjects: list[dict]) -> dict | None:
     }
 
 
-def week_hours(session: Session, today: date) -> dict:
+def week_hours(session: Session, today: date, area: areas.Area = "faculdade") -> dict:
+    """Horas da semana de uma área (D41: as horas de curso contam separadas, com meta própria)."""
     start = today - timedelta(days=today.weekday())  # segunda-feira
     end = start + timedelta(days=7)
     rows = session.scalars(
@@ -146,6 +147,8 @@ def week_hours(session: Session, today: date) -> dict:
             models.StudySession.started_at < datetime.combine(end, time.min),
         )
     ).all()
+    course_ids = areas.course_subject_ids(session)
+    rows = [r for r in rows if areas.in_area(r.subject_id, area, course_ids)]
     per_day = {start + timedelta(days=i): 0 for i in range(7)}
     for row in rows:
         per_day[row.started_at.date()] += row.seconds
@@ -153,7 +156,8 @@ def week_hours(session: Session, today: date) -> dict:
         "start": start.isoformat(),
         "days": [{"date": d.isoformat(), "seconds": s} for d, s in per_day.items()],
         "total_seconds": sum(per_day.values()),
-        "goal_hours": settings_store.get(session, "weekly_hours_goal"),
+        "goal_hours": settings_store.get(
+            session, "weekly_hours_goal" if area == "faculdade" else "course_weekly_goal_hours"),
     }
 
 
@@ -235,7 +239,7 @@ def compute_overview(session: Session, today: date) -> dict:
         "next_action": _with_reviews(session, today, study),
         "next_study_action": study,
         # v1.6 (D35): cards vencidos hoje aparecem junto da próxima ação
-        "cards_due": cards.due_count(session, today),
+        "cards_due": cards.due_count(session, today, area="faculdade"),
         "week": week_hours(session, today),
         "timeline": timeline(session, subjects, today),
         "timer": {
@@ -247,7 +251,7 @@ def compute_overview(session: Session, today: date) -> dict:
 
 def _with_reviews(session: Session, today: date, study_action: dict | None) -> dict | None:
     """Retestes vencidos passam na frente do estudo novo (SPEC §6.1)."""
-    due = learning.due_reviews(session, today)
+    due = learning.due_reviews(session, today, area="faculdade")
     if not due:
         return study_action
     r = due[0]

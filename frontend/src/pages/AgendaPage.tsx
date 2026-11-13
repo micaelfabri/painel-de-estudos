@@ -8,11 +8,12 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { api, type AgendaItem, type Deadline, type Exam, type Subject } from "@/lib/api";
+import { api, type AgendaItem, type Deadline, type Exam } from "@/lib/api";
 import { formatDayMonth, parseLocalDate } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
 import { cn } from "@/lib/utils";
 import { EditDialog, type Editing } from "@/pages/manage/ExamsPage";
+import { useCollegeSubjects } from "@/lib/area";
 
 const todayIso = () => {
   const d = new Date();
@@ -22,7 +23,7 @@ const todayIso = () => {
 /** Estudo › Provas e prazos (SPEC D14): tudo numa lista, com marcar como feito, editar e lançar resultado */
 export function AgendaPage() {
   const agenda = useApi<AgendaItem[]>("/study/agenda");
-  const subjects = useApi<Subject[]>("/subjects");
+  const collegeSubjects = useCollegeSubjects();
   const [editing, setEditing] = React.useState<Editing>(null);
   const [resultFor, setResultFor] = React.useState<AgendaItem | null>(null);
   // v1.5: marcar/desmarcar como feito pede confirmação (evita marcar a prova errada sem querer)
@@ -119,7 +120,7 @@ export function AgendaPage() {
 
       <EditDialog
         editing={editing}
-        subjects={subjects.data ?? []}
+        subjects={collegeSubjects}
         onClose={() => setEditing(null)}
         onSaved={() => void agenda.reload()}
       />

@@ -24,6 +24,14 @@ const FIELDS: {
     kind: "number",
     optional: true,
   },
+  // v1.8 (D40, D41): cursos fora da faculdade têm meta própria e só entram no dia se ligar
+  {
+    key: "course_weekly_goal_hours",
+    label: "Meta de horas por semana em cursos",
+    kind: "number",
+    optional: true,
+  },
+  { key: "courses_in_day_plan", label: 'Incluir os cursos em "Montar o dia"', kind: "bool" },
   {
     key: "timer_goal_minutes",
     label: "Meta do cronômetro por tema (min)",

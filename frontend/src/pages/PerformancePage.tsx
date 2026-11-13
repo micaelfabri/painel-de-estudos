@@ -1,3 +1,4 @@
+import { CheckCircle2, Circle } from "lucide-react";
 import * as React from "react";
 
 import { toast } from "sonner";
@@ -11,7 +12,8 @@ import { Select } from "@/components/ui/select";
 import { InlineMeter } from "@/components/panel/InlineMeter";
 import { TimerSessionsCard } from "@/components/panel/TimerSessionsCard";
 import { useAgent } from "@/components/agent/AgentContext";
-import type { DayDetail, Metrics } from "@/lib/api";
+import type { Area, DayDetail, Metrics } from "@/lib/api";
+import { AREA_TEXT } from "@/lib/area";
 import { formatDuration, formatLongDate, formatTime, parseLocalDate, parseLocalDateTime } from "@/lib/format";
 import { mistakeSummary } from "@/lib/mistakes";
 import { useApi } from "@/lib/useApi";
@@ -36,15 +38,19 @@ function Kpi({ label, value, hint }: { label: string; value: string; hint?: stri
 function DayCard({
   day,
   subjectId,
+  area,
   onOpen,
   onClose,
 }: {
   day: string;
   subjectId: string;
+  area: Area;
   onOpen: (id: number) => void;
   onClose: () => void;
 }) {
-  const detail = useApi<DayDetail>(`/study/day?day=${day}${subjectId !== "all" ? `&subject_id=${subjectId}` : ""}`);
+  const detail = useApi<DayDetail>(
+    `/study/day?day=${day}&area=${area}${subjectId !== "all" ? `&subject_id=${subjectId}` : ""}`,
+  );
   const d = detail.data;
   return (
     <Card>
@@ -60,7 +66,7 @@ function DayCard({
         </div>
         {!d ? (
           <p className="text-sm text-muted-foreground">Carregando…</p>
-        ) : d.chunks.length === 0 && d.sets.length === 0 ? (
+        ) : d.chunks.length === 0 && d.sets.length === 0 && d.tasks.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nada registrado neste dia.</p>
         ) : (
           <div className="grid gap-6 md:grid-cols-2">
@@ -103,6 +109,38 @@ function DayCard({
                 </ul>
               )}
             </section>
+            {/* v1.7.2: as tarefas do dia continuam salvas depois que o dia vira */}
+            <section aria-label="Tarefas do dia" className="space-y-2 md:col-span-2">
+              <p className="text-sm font-medium">
+                Tarefas do dia · {d.tasks.filter((t) => t.done).length} de {d.tasks.length} feitas
+              </p>
+              {d.tasks.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhuma tarefa neste dia.</p>
+              ) : (
+                <ul className="divide-y divide-border text-sm">
+                  {d.tasks.map((t) => (
+                    <li key={t.id} className="flex items-center gap-3 py-2">
+                      {t.done ? (
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-success-text" aria-hidden="true" />
+                      ) : (
+                        <Circle className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      )}
+                      <span className={cn("min-w-0 flex-1", t.done && "text-muted-foreground line-through")}>
+                        {t.label}
+                      </span>
+                      {t.planned_minutes ? (
+                        <span className="tabular-nums text-muted-foreground">
+                          {formatDuration(t.planned_minutes * 60)}
+                        </span>
+                      ) : null}
+                      <span className="w-16 shrink-0 text-right text-xs text-muted-foreground">
+                        {t.done ? "feita" : "não feita"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           </div>
         )}
       </CardContent>
@@ -110,13 +148,16 @@ function DayCard({
   );
 }
 
-/** Estudo › Desempenho (SPEC D25): métricas além do painel, por período */
-export function PerformancePage() {
+/** Estudo › Desempenho (SPEC D25): métricas além do painel, por período. v1.8: também na área de cursos */
+export function PerformancePage({ area = "faculdade" }: { area?: Area }) {
+  const text = AREA_TEXT[area];
   const [days, setDays] = React.useState("30");
   const [subject, setSubject] = React.useState("all");
   const [day, setDay] = React.useState<string | null>(null);
   const coarse = useCoarsePointer();
-  const metrics = useApi<Metrics>(`/study/metrics?days=${days}${subject !== "all" ? `&subject_id=${subject}` : ""}`);
+  const metrics = useApi<Metrics>(
+    `/study/metrics?days=${days}&area=${area}${subject !== "all" ? `&subject_id=${subject}` : ""}`,
+  );
   const { learningVersion, openSet } = useAgent();
   const subjects = React.useRef<{ value: string; label: string }[]>([]);
   if (metrics.data && subject === "all")
@@ -139,7 +180,7 @@ export function PerformancePage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Desempenho</h1>
+          <h1 className="text-2xl font-semibold">{area === "cursos" ? "Desempenho nos cursos" : "Desempenho"}</h1>
           <p className="text-sm text-muted-foreground">Horas, notas, temas e foco no período escolhido.</p>
         </div>
       </header>
@@ -162,7 +203,7 @@ export function PerformancePage() {
           </Field>
         </div>
         <div className="w-full sm:w-72">
-          <Field id="perf-subject" label="Disciplina">
+          <Field id="perf-subject" label={text.subject}>
             {() => (
               <Select
                 id="perf-subject"
@@ -171,7 +212,7 @@ export function PerformancePage() {
                   setSubject(v);
                   setDay(null);
                 }}
-                options={[{ value: "all", label: "Todas as disciplinas" }, ...subjects.current]}
+                options={[{ value: "all", label: text.allSubjects }, ...subjects.current]}
               />
             )}
           </Field>
@@ -230,7 +271,7 @@ export function PerformancePage() {
               </CardContent>
             </Card>
           </section>
-          {day && <DayCard day={day} subjectId={subject} onOpen={open} onClose={() => setDay(null)} />}
+          {day && <DayCard day={day} subjectId={subject} area={area} onOpen={open} onClose={() => setDay(null)} />}
 
           <section aria-labelledby="h-por-disciplina" className="space-y-3">
             <h2 id="h-por-disciplina" className="text-lg font-semibold">
@@ -272,7 +313,7 @@ export function PerformancePage() {
           </section>
 
           <section className="grid gap-4 xl:grid-cols-2">
-            <TimerSessionsCard />
+            <TimerSessionsCard area={area} />
             <Card>
               <CardContent className="space-y-3">
                 <CardEyebrow>Notas de provas, labs e simulados</CardEyebrow>

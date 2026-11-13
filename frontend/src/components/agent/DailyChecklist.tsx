@@ -20,6 +20,8 @@ export function DailyChecklist() {
   const { setPreset, learningVersion } = useAgent();
   const [items, setItems] = React.useState<ChecklistItem[]>([]);
   const [reviews, setReviews] = React.useState<ReviewDue[]>([]);
+  // v1.7.2: não feitas de dias anteriores, para trazer para hoje
+  const [pending, setPending] = React.useState<ChecklistItem[]>([]);
   const [newLabel, setNewLabel] = React.useState("");
   const [announce, setAnnounce] = React.useState("");
   const [editingId, setEditingId] = React.useState<number | null>(null);
@@ -27,12 +29,14 @@ export function DailyChecklist() {
   const day = todayIso();
 
   const load = React.useCallback(async () => {
-    const [list, due] = await Promise.all([
+    const [list, due, past] = await Promise.all([
       api.get<ChecklistItem[]>(`/learning/checklist?day=${day}`),
       api.get<ReviewDue[]>(`/learning/reviews?today=${day}`),
+      api.get<ChecklistItem[]>(`/learning/checklist/pending?day=${day}`).catch(() => []),
     ]);
     setItems(list);
     setReviews(due);
+    setPending(past);
   }, [day]);
 
   React.useEffect(() => {
@@ -85,6 +89,17 @@ export function DailyChecklist() {
     }
   };
 
+  const carry = async () => {
+    try {
+      const res = await api.post<{ added: number; items: ChecklistItem[] }>(`/learning/checklist/carry?day=${day}`, {});
+      setItems(res.items);
+      setPending([]);
+      toast.success(`${res.added} tarefa(s) trazida(s) para hoje.`);
+    } catch {
+      toast.error("Não foi possível trazer as tarefas.");
+    }
+  };
+
   const add = async (e: React.FormEvent) => {
     e.preventDefault();
     const label = newLabel.trim();
@@ -124,6 +139,16 @@ export function DailyChecklist() {
           Montar o dia
         </Button>
       </div>
+      {pending.length > 0 && (
+        <p className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+          <span>
+            {pending.length === 1 ? "1 tarefa não feita" : `${pending.length} tarefas não feitas`} de dias anteriores.
+          </span>
+          <Button variant="link" size="sm" className="h-auto px-0" onClick={carry}>
+            Trazer para hoje
+          </Button>
+        </p>
+      )}
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nenhuma tarefa. Use "Montar o dia" ou adicione abaixo.</p>
       ) : (

@@ -82,11 +82,16 @@ export function CardReview({
   const [result, setResult] = React.useState<CardReviewResult | null>(null);
   const [sending, setSending] = React.useState(false);
   const summaryRef = React.useRef<HTMLParagraphElement>(null);
+  const backRef = React.useRef<HTMLParagraphElement>(null);
   const groupId = `card-${card.id}`;
 
   React.useEffect(() => {
     if (result) summaryRef.current?.focus();
   }, [result]);
+  // Resposta 05 do DS: ao virar, o foco vai para o verso do card
+  React.useEffect(() => {
+    if (flipped) backRef.current?.focus();
+  }, [flipped]);
 
   const send = async (body: { mode: "answer" | "flip"; knew?: boolean; chosen_index?: number }) => {
     setSending(true);
@@ -168,7 +173,11 @@ export function CardReview({
         </RadioGroup>
       )}
 
-      {mode === "flip" && flipped && <p className="text-base font-medium">{card.back}</p>}
+      {mode === "flip" && flipped && (
+        <p ref={backRef} tabIndex={-1} className="text-base font-medium focus:outline-none">
+          {card.back}
+        </p>
+      )}
 
       <div aria-live="polite">
         {result && (

@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/select";
 import { api, type Deadline, type Exam, type Subject } from "@/lib/api";
 import { formatDayMonth, formatTime, parseLocalDate, parseLocalDateTime } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
+import { useCollegeSubjects } from "@/lib/area";
 
 export type Editing = { type: "exam"; item: Exam | null } | { type: "deadline"; item: Deadline | null } | null;
 
@@ -35,6 +36,7 @@ export function ExamsPage() {
   const exams = useApi<Exam[]>("/exams");
   const deadlines = useApi<Deadline[]>("/deadlines");
   const subjects = useApi<Subject[]>("/subjects");
+  const collegeSubjects = useCollegeSubjects();
   const [editing, setEditing] = React.useState<Editing>(null);
   const subjectName = (id: number | null) => subjects.data?.find((s) => s.id === id)?.name ?? "—";
 
@@ -119,7 +121,7 @@ export function ExamsPage() {
 
       <EditDialog
         editing={editing}
-        subjects={subjects.data ?? []}
+        subjects={collegeSubjects}
         onClose={() => setEditing(null)}
         onSaved={() => {
           void exams.reload();

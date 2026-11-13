@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from .. import learning, models, settings_store
+from .. import areas, learning, models, settings_store
 from ..db import get_session
 from ..integrations import notion
 from . import prompts
@@ -352,6 +352,8 @@ class MistakesRedoIn(BaseModel):
     # Padrão: tudo que não foi corrigido (não revisados, revisados e para revisar de novo)
     statuses: list[Literal["open", "reviewed", "again"]] = Field(default_factory=lambda: ["open", "reviewed", "again"])
     limit: int = Field(default=10, ge=1, le=50)
+    # v1.8: refazer só os erros da área aberta (faculdade ou cursos); vazio = todos
+    area: areas.Area | None = None
 
 
 @router.post("/mistakes/redo", status_code=201)
@@ -364,6 +366,9 @@ def redo_mistakes(data: MistakesRedoIn, request: Request, session: Session = Dep
         stmt = stmt.where(models.Mistake.topic_id == data.topic_id)
     if data.subject_id is not None:
         stmt = stmt.where(models.Topic.subject_id == data.subject_id)
+    if data.area is not None and data.topic_id is None and data.subject_id is None:
+        ids = areas.course_subject_ids(session)
+        stmt = stmt.where(models.Topic.subject_id.in_(ids) if data.area == "cursos" else models.Topic.subject_id.not_in(ids))
     mistakes = session.scalars(stmt.limit(data.limit)).all()
     questions = [(m, session.get(models.Question, m.question_id)) for m in mistakes]
     questions = [(m, q) for m, q in questions if q is not None and not q.flagged_bad]

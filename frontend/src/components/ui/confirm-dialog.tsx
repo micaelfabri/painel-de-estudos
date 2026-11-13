@@ -17,6 +17,7 @@ export function ConfirmDialog({
   title,
   note,
   confirmLabel,
+  cancelLabel = "Cancelar",
   destructive = false,
   onConfirm,
 }: {
@@ -25,14 +26,21 @@ export function ConfirmDialog({
   title: string;
   note?: React.ReactNode;
   confirmLabel: string;
+  /** Texto do botão que fecha sem fazer nada (padrão "Cancelar") */
+  cancelLabel?: string;
   destructive?: boolean;
   onConfirm: () => Promise<void> | void;
 }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // Resposta 06 do DS: ao fechar, o foco volta para quem abriu (o diálogo não tem gatilho próprio)
+  const opener = React.useRef<HTMLElement | null>(null);
   React.useEffect(() => {
-    if (open) setError(null);
+    if (open) {
+      setError(null);
+      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
   }, [open]);
 
   const confirm = async (ev: React.MouseEvent) => {
@@ -55,6 +63,13 @@ export function ConfirmDialog({
       <AlertDialogPrimitive.Portal>
         <AlertDialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" />
         <AlertDialogPrimitive.Content
+          onCloseAutoFocus={(e) => {
+            const el = opener.current;
+            if (el && el.isConnected) {
+              e.preventDefault();
+              el.focus();
+            }
+          }}
           className={cn(
             "fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100%-32px)] max-w-lg -translate-x-1/2 -translate-y-1/2",
             "space-y-4 overflow-y-auto rounded-xl border border-border bg-card p-6 shadow-lg",
@@ -83,7 +98,7 @@ export function ConfirmDialog({
           <div className="flex gap-3">
             <AlertDialogPrimitive.Cancel asChild>
               <Button variant="secondary" className="flex-1" disabled={busy}>
-                Cancelar
+                {cancelLabel}
               </Button>
             </AlertDialogPrimitive.Cancel>
             <AlertDialogPrimitive.Action asChild>

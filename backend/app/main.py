@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import cards, course, learning, models, overview, schemas, settings_store, study
+from . import cards, course, courses, learning, models, overview, schemas, settings_store, study
 from .agent.router import router as agent_router
 from .crud import crud_router
 from .db import get_session
@@ -114,6 +114,7 @@ app.include_router(study.router)
 app.include_router(cards.router)
 app.include_router(prints.router)
 app.include_router(course.router)
+app.include_router(courses.router)
 app.include_router(notion.router)
 app.include_router(google_calendar.router)
 app.include_router(

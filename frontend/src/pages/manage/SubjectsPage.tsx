@@ -23,15 +23,19 @@ export function SubjectsPage() {
   const [creating, setCreating] = React.useState(false);
   const [topicsOf, setTopicsOf] = React.useState<Subject | null>(null);
 
-  const rows = (subjects.data ?? []).filter((s) => {
-    if (filter === "current") return current ? s.semester_id === current.id : false;
-    if (filter === "pending") return s.semester_id === null;
-    if (filter === "all") return true;
-    return s.semester_id === Number(filter);
-  });
+  // v1.8 (D38): os módulos dos cursos ficam em Cursos e certificados, não aqui
+  const collegeIds = new Set((degrees.data ?? []).filter((d) => d.kind === "degree").map((d) => d.id));
+  const rows = (subjects.data ?? [])
+    .filter((s) => collegeIds.has(s.degree_id))
+    .filter((s) => {
+      if (filter === "current") return current ? s.semester_id === current.id : false;
+      if (filter === "pending") return s.semester_id === null;
+      if (filter === "all") return true;
+      return s.semester_id === Number(filter);
+    });
 
   const semesterCode = (id: number | null) => semesters.data?.find((s) => s.id === id)?.code ?? "—";
-  const degreeId = degrees.data?.[0]?.id;
+  const degreeId = degrees.data?.find((d) => d.kind === "degree")?.id;
 
   return (
     <div className="space-y-6">

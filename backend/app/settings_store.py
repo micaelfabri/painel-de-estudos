@@ -24,6 +24,8 @@ KNOWN: dict[str, tuple[Any, Any, str]] = {
     "learned_threshold": (float, 0.7, "Nota mínima no reteste de 7 dias para 'aprendido'"),
     "calendar_id": (str | None, None, "ID da agenda do Google usada pelo painel"),
     "notion_page_ids": (list[str], [], "Páginas do Notion compartilhadas com a integração"),
+    "course_weekly_goal_hours": (float | None, 5.0, "Meta de horas por semana nos cursos fora da faculdade (D41)"),
+    "courses_in_day_plan": (bool, False, "Os cursos entram no \"Montar o dia\" (retestes e próxima aula) (D40)"),
     "exam_minutes": (int, 60, "Tempo do simulado da prova, em minutos (D16)"),
     "agent_reads_metrics": (bool, True, "O agente pode ler um resumo dos meus números de estudo (horas, notas, temas)"),
     "vision_model": (str | None, None, "Modelo que lê imagens, para as notas pelos prints (vazio = modelo padrão)"),

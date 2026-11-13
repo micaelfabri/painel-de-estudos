@@ -1,6 +1,6 @@
 # SPEC — Painel de Estudos (painel-de-estudos)
 
-Version 1.6 · 12/11/2026 · Owner: (seu nome aqui) · Builder: Claude Code
+Version 1.8 · 13/11/2026 · Owner: (seu nome aqui) · Builder: Claude Code
 Bilingual file (DIRETRIZ_BILINGUE_v1): English first, Portuguese after. If they differ, the Portuguese prevails.
 
 ---
@@ -170,7 +170,7 @@ This public copy ships with **fictional data** (`backend/app/seed.py`): an examp
 | # | Decision |
 |---|---|
 | D23 | **14-day strip** as approved: two rows of 7 days, counts per type in each day (exam, deadline/lab/activity/mock, calendar event), click a day to see its list with times; done items struck through. |
-| D24 | **Timer sessions**: from the first Iniciar to Finalizar (or Zerar) is one session. It counts pauses, sums the studied chunks and keeps a hidden clock from start to end (pauses included). "Finalizar" closes the session; every session is saved and listed on the Painel and in Desempenho. |
+| D24 | **Timer sessions**: from the first Iniciar to Finalizar is one session. It counts pauses, sums the studied chunks and keeps a hidden clock from start to end (pauses included). "Finalizar" closes the session; every finished session is saved and listed on the Painel and in Desempenho. v1.7.2 (13/11/2026): "Zerar" became "Cancelar", which discards the session and its chunks after a confirmation (old "zerada" sessions stay). |
 | D25 | **Desempenho** page (Study mode): hours per day, test scores over time with the 70% line, accuracy, streak, per-subject numbers (hours, tests, average, topics learned, open mistakes), timer focus (studied ÷ total) and pauses, scores of exams/labs/mocks. Period 7/30/90 days. The agent reads a short summary of these numbers (local model only); authorized by me on 12/11/2026, on by default and can be turned off in Settings. |
 | D26 | **Mocks** ("simulados" of the college): own deadline kind `mock`; each current subject has 2 (10 questions, up to 1.0 point each). Labs, activities and mocks can link their **own Notion page**, used to read the prints. |
 | D27 | Footer links in the official brand colors. |
@@ -211,6 +211,27 @@ Data: new tables `card` (front, back, type, mode, topic, source: mistake/text/pr
 | C2 | D36 prints | A lab with a wrong print generates a card with that question and its right answer |
 | C3 | D35, quick round, card of the day, optional Notion export | A card marked "Não sabia" is due again the next day; a quick round of 10 ends with the result; the card of the day shows on the Painel |
 | C4 | D36 videos (after the voice phases) | A card cites a video passage transcribed locally |
+
+### 18. Version 1.8 (13/11/2026): courses and certificates
+Approved by me on 13/11/2026, with all of Claude's recommendations (mockups shown in the chat). Courses outside the college (free courses, courses with a certificate, certification exams, languages, bootcamps) get their own area, without mixing with the college.
+
+| # | Decision |
+|---|---|
+| D38 | **Separate area.** The Study sidebar gets two groups: **Faculdade** (Painel, Provas e prazos, Histórico, Cards, Desempenho, as today) and **Cursos e certificados** (Meus cursos, Histórico, Cards, Desempenho). College pages show only the college (degrees of kind `degree`); course pages show only courses. The Painel stays college-only. |
+| D39 | **A course reuses the hierarchy.** Course = `degree` of kind `course`, with: platform, type (curso com certificado, certificação com prova, idioma, bootcamp, curso livre), link, status (quero fazer, fazendo, pausado, concluído), total hours, start date, target date, certificate path (materials folder), counts as AAC (+ category), optional Notion page, exam date (certifications). Modules = subjects without a semester; lessons = topics. Questions, cards, timer, history, charts and the mistake cycle work for courses as they do for the college. Progress = modules done / total; without modules, a manual %. |
+| D40 | **Day plan.** Courses do not enter "Montar o dia" (retests and next step) by default; a switch in Configurações turns them on. Inside a course, the agent generates questions and cards as usual. |
+| D41 | **Hours.** Course hours count separately, with their own weekly goal (default 5 h, in Configurações). The college weekly hours and goal do not include them. The timer lists college subjects and course modules in separate groups. |
+| D42 | **Certification exams** live only in the course area (course page and Meus cursos), not in Provas e prazos or the 14-day strip. |
+| D43 | **AAC bridge.** When a course that counts as AAC is concluded, "Lançar como AAC" creates the AAC activity already filled (title, category, hours, date, certificate) and links it to the course, once; no double typing, no double counting. |
+| D44 | **Notion.** Optional link to a Notion page per course (open the page); lessons can link Notion pages as topics already do. Same rules as today (never delete). |
+
+Data: new columns on `degree` (platform, course_type, url, course_status, start_date, target_date, certificate_path, counts_acc, acc_category, notion_page_id, exam_at, manual_progress, acc_activity_id) and settings `course_weekly_goal_hours` and `courses_in_day_plan`. New migration; the daily backup covers it.
+
+| Phase | Content | Done when |
+|---|---|---|
+| K1 | D38, D39: sidebar groups, Meus cursos (tabs by status, summary, course cards), Novo curso | I create a course with 9 modules; it shows under "Fazendo" with 0% and does not appear on the college Painel |
+| K2 | Course page: modules and lessons, questions, cards and timer per course, D41, D42, D44 | I time 20 min on a module; it counts in "Horas em cursos" and not in the college week; a question set on a lesson shows in Cursos › Histórico only |
+| K3 | Cursos › Histórico, Cards, Desempenho; D40 switch; D43 AAC bridge | A concluded course that counts as AAC creates one AAC activity with its hours, and the button disappears |
 
 ---
 
@@ -381,7 +402,7 @@ Esta cópia pública vem com **dados fictícios** (`backend/app/seed.py`): uma g
 | # | Decisão |
 |---|---|
 | D23 | **Faixa de 14 dias** como aprovada: duas linhas de 7 dias, contagens por tipo em cada dia (prova, prazo/lab/atividade/simulado, evento da agenda), clique no dia abre a lista com horários; itens feitos riscados. |
-| D24 | **Sessões do cronômetro**: do primeiro Iniciar até Finalizar (ou Zerar) é uma sessão. Conta as pausas, soma os trechos estudados e guarda um relógio oculto do início ao fim (com as pausas). "Finalizar" fecha a sessão; toda sessão fica salva e aparece no Painel e em Desempenho. |
+| D24 | **Sessões do cronômetro**: do primeiro Iniciar até Finalizar é uma sessão. Conta as pausas, soma os trechos estudados e guarda um relógio oculto do início ao fim (com as pausas). "Finalizar" fecha a sessão; toda sessão finalizada fica salva e aparece no Painel e em Desempenho. v1.7.2 (13/11/2026): "Zerar" virou "Cancelar", que descarta a sessão e os trechos depois de uma confirmação (as sessões "zeradas" antigas continuam). |
 | D25 | Página **Desempenho** (modo Estudo): horas por dia, notas dos testes no tempo com a linha dos 70%, acerto, sequência de dias, números por disciplina (horas, testes, média, temas aprendidos, erros em aberto), foco no cronômetro (estudado ÷ total) e pausas, notas de provas/labs/simulados. Período de 7/30/90 dias. O agente lê um resumo desses números (só modelo local); autorizado por mim em 12/11/2026, ligado por padrão e dá para desligar em Configurações. |
 | D26 | **Simulados** da faculdade: tipo próprio de prazo, `mock`; cada disciplina atual tem 2 (10 questões, até 1,0 ponto cada). Labs, atividades e simulados podem ligar a **própria página do Notion**, usada para ler os prints. |
 | D27 | Links do rodapé nas cores oficiais das marcas. |
@@ -422,3 +443,24 @@ Dados: tabelas novas `card` (frente, verso, tipo, modo, tema, origem: erro/texto
 | C2 | D36 prints | Um lab com print errado gera um card com aquela questão e a resposta certa |
 | C3 | D35, rodada rápida, card do dia, exportar para o Notion (opcional) | Um card marcado "Não sabia" vence de novo no dia seguinte; uma rodada rápida de 10 termina com o resultado; o card do dia aparece no Painel |
 | C4 | D36 vídeos (depois das fases de voz) | Um card cita um trecho de vídeo transcrito localmente |
+
+### 18. Versão 1.8 (13/11/2026): cursos e certificados
+Aprovado por mim em 13/11/2026, com todas as recomendações do Claude (maquetes mostradas no chat). Cursos fora da faculdade (cursos livres, cursos com certificado, provas de certificação, idiomas, bootcamps) ganham uma área própria, sem misturar com a faculdade.
+
+| # | Decisão |
+|---|---|
+| D38 | **Área separada.** A barra lateral do Estudo ganha dois grupos: **Faculdade** (Painel, Provas e prazos, Histórico, Cards, Desempenho, como hoje) e **Cursos e certificados** (Meus cursos, Histórico, Cards, Desempenho). As páginas da faculdade mostram só a faculdade (graduações do tipo `degree`); as de cursos, só os cursos. O Painel continua só com a faculdade. |
+| D39 | **O curso reaproveita a hierarquia.** Curso = `degree` do tipo `course`, com: plataforma, tipo (curso com certificado, certificação com prova, idioma, bootcamp, curso livre), link, situação (quero fazer, fazendo, pausado, concluído), carga horária, início, meta de data, caminho do certificado (pasta de materiais), conta como AAC (+ categoria), página do Notion opcional, data da prova (certificações). Módulos = disciplinas sem semestre; aulas = temas. Questões, cards, cronômetro, histórico, gráficos e ciclo dos erros funcionam nos cursos como na faculdade. Progresso = módulos concluídos / total; sem módulos, um % manual. |
+| D40 | **Plano do dia.** Os cursos não entram no "Montar o dia" (retestes e próximo passo) por padrão; uma chave em Configurações liga. Dentro do curso, o agente gera questões e cards como sempre. |
+| D41 | **Horas.** As horas de curso contam separadas, com meta semanal própria (padrão 5 h, em Configurações). As horas e a meta da semana da faculdade não incluem os cursos. O cronômetro lista disciplinas da faculdade e módulos dos cursos em grupos separados. |
+| D42 | **Provas de certificação** ficam só na área de cursos (página do curso e Meus cursos), não em Provas e prazos nem na faixa de 14 dias. |
+| D43 | **Ponte com a AAC.** Ao concluir um curso que conta como AAC, "Lançar como AAC" cria a atividade de AAC já preenchida (título, categoria, horas, data, certificado) e liga ao curso, uma vez só; sem digitar duas vezes e sem contar em dobro. |
+| D44 | **Notion.** Link opcional para uma página do Notion por curso (abrir a página); as aulas podem ligar páginas do Notion como os temas já fazem. Mesmas regras de hoje (nunca apagar). |
+
+Dados: colunas novas em `degree` (platform, course_type, url, course_status, start_date, target_date, certificate_path, counts_acc, acc_category, notion_page_id, exam_at, manual_progress, acc_activity_id) e as configurações `course_weekly_goal_hours` e `courses_in_day_plan`. Migração nova; o backup diário cobre.
+
+| Fase | Conteúdo | Pronto quando |
+|---|---|---|
+| K1 | D38, D39: grupos da barra lateral, Meus cursos (abas por situação, resumo, cards de curso), Novo curso | Crio um curso com 9 módulos; ele aparece em "Fazendo" com 0% e não aparece no Painel da faculdade |
+| K2 | Página do curso: módulos e aulas, questões, cards e cronômetro por curso, D41, D42, D44 | Cronometro 20 min num módulo; conta em "Horas em cursos" e não na semana da faculdade; um teste numa aula aparece só em Cursos › Histórico |
+| K3 | Cursos › Histórico, Cards, Desempenho; chave do D40; ponte do D43 com a AAC | Um curso concluído que conta como AAC cria uma atividade de AAC com as horas dele, e o botão some |
