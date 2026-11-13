@@ -6,19 +6,23 @@ import { useAgent } from "@/components/agent/AgentContext";
 import { CardSourcesDialog } from "@/components/cards/CardSourcesDialog";
 import { startDue, startRound } from "@/components/cards/CardSessionView";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Field } from "@/components/ui/field";
 import { Select } from "@/components/ui/select";
-import { agentErrorMessage, api, type CardsSummary, type CardView, type Overview } from "@/lib/api";
+import { agentErrorMessage, api, type Area, type CardsSummary, type CardView } from "@/lib/api";
+import { AREA_TEXT, useAreaSubjects } from "@/lib/area";
+import { usePaged } from "@/lib/usePaged";
 import { useApi } from "@/lib/useApi";
 
 type Generated = { topic_id: number; topic_title: string; cards: CardView[] };
 
-/** Estudo › Cards (SPEC D32–D37): cards feitos a partir do que mais erro */
-export function CardsPage() {
-  const summary = useApi<CardsSummary>("/cards/summary");
-  const overview = useApi<Overview>("/overview");
+/** Estudo › Cards (SPEC D32–D37): cards feitos a partir do que mais erro. v1.8: também na área de cursos */
+export function CardsPage({ area = "faculdade" }: { area?: Area }) {
+  const summary = useApi<CardsSummary>(`/cards/summary?area=${area}`);
+  const areaSubjects = useAreaSubjects(area);
+  const text = AREA_TEXT[area];
   const { openCards, model, learningVersion } = useAgent();
   const [scope, setScope] = React.useState("weak");
   const [busy, setBusy] = React.useState<string | null>(null);
@@ -29,13 +33,15 @@ export function CardsPage() {
     if (learningVersion > 0) void reload();
   }, [learningVersion, reload]);
 
-  const subjects = (overview.data?.subjects ?? []).map((s) => ({ id: s.id, name: s.name }));
+  const subjects = areaSubjects;
   const s = summary.data;
+  // v1.7.2: lista por tema em páginas de 10
+  const topicPages = usePaged(s?.topics ?? []);
 
   const generate = async (body: Record<string, unknown>, label: string) => {
     setBusy(label);
     try {
-      const out = await api.post<Generated>("/cards/generate", { ...body, model });
+      const out = await api.post<Generated>("/cards/generate", { ...body, area, model });
       if (out.cards.length) toast.success(`${out.cards.length} cards criados: ${out.topic_title}`);
       else toast.info(`Nenhum card novo em ${out.topic_title}: o modelo repetiu cards que você já tem.`);
       if (out.cards.length) openCards({ title: `Cards novos · ${out.topic_title}`, cards: out.cards });
@@ -57,18 +63,22 @@ export function CardsPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Cards</h1>
+          <h1 className="text-2xl font-semibold">{area === "cursos" ? "Cards dos cursos" : "Cards"}</h1>
           <p className="text-sm text-muted-foreground">
             Feitos a partir do que você mais erra.
             {s && ` ${s.due} para revisar hoje · ${s.total} no total.`}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={!s?.due} onClick={() => void startDue(openCards)}>
+          <Button
+            variant="outline"
+            disabled={!s?.due}
+            onClick={() => void startDue(openCards, undefined, undefined, area)}
+          >
             <Layers aria-hidden="true" />
             Revisar vencidos{s?.due ? ` (${s.due})` : ""}
           </Button>
-          <Button variant="outline" disabled={!s?.total} onClick={() => void startRound(openCards)}>
+          <Button variant="outline" disabled={!s?.total} onClick={() => void startRound(openCards, null, area)}>
             <Zap aria-hidden="true" />
             Rodada rápida (10)
           </Button>
@@ -86,7 +96,7 @@ export function CardsPage() {
                   value={scope}
                   onValueChange={setScope}
                   options={[
-                    { value: "weak", label: "Todas as disciplinas" },
+                    { value: "weak", label: text.allSubjects },
                     ...subjects.map((x) => ({ value: String(x.id), label: x.name })),
                   ]}
                 />
@@ -114,7 +124,12 @@ export function CardsPage() {
       </Card>
 
       <section aria-labelledby="h-cards-topics" className="space-y-3">
-        <h2 id="h-cards-topics" className="text-lg font-semibold">
+        <h2
+          id="h-cards-topics"
+          ref={topicPages.anchor as React.RefObject<HTMLHeadingElement>}
+          tabIndex={-1}
+          className="scroll-mt-20 focus:outline-none text-lg font-semibold"
+        >
           Por tema
         </h2>
         {summary.error && (
@@ -131,7 +146,7 @@ export function CardsPage() {
         ) : (
           <Card>
             <ul className="divide-y divide-border">
-              {s?.topics.map((t) => (
+              {topicPages.slice.map((t) => (
                 <li key={t.topic_id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-3">
                   <span className="min-w-0 flex-1 text-sm">
                     <span className="block font-medium">
@@ -172,6 +187,13 @@ export function CardsPage() {
             </ul>
           </Card>
         )}
+        <Pagination
+          page={topicPages.page}
+          pages={topicPages.pages}
+          total={topicPages.total}
+          onPage={topicPages.goTo}
+          label="Páginas dos cards por tema"
+        />
       </section>
 
       <CardSourcesDialog

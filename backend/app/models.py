@@ -41,6 +41,25 @@ class Degree(TimestampMixin, Base):
     reported_at: Mapped[date | None] = mapped_column(Date)
     expected_end: Mapped[str | None] = mapped_column(String(20))
     notes: Mapped[str | None] = mapped_column(Text)
+    # v1.8 (D39): campos dos cursos fora da faculdade (kind = "course"); vazios numa graduação
+    platform: Mapped[str | None] = mapped_column(String(100))
+    # course_certificate | certification | language | bootcamp | free
+    course_type: Mapped[str | None] = mapped_column(String(30))
+    url: Mapped[str | None] = mapped_column(String(500))
+    # wishlist | doing | paused | done
+    course_status: Mapped[str | None] = mapped_column(String(20))
+    start_date: Mapped[date | None] = mapped_column(Date)
+    target_date: Mapped[date | None] = mapped_column(Date)
+    certificate_path: Mapped[str | None] = mapped_column(String(500))
+    counts_acc: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    acc_category: Mapped[str | None] = mapped_column(String(100))
+    notion_page_id: Mapped[str | None] = mapped_column(String(64))
+    exam_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Progresso digitado (0–100) para curso sem módulos, ex.: idioma
+    manual_progress: Mapped[int | None] = mapped_column(Integer)
+    finished_on: Mapped[date | None] = mapped_column(Date)
+    # D43: atividade de AAC criada a partir deste curso (uma vez só)
+    acc_activity_id: Mapped[int | None] = mapped_column(ForeignKey("acc_activity.id", ondelete="SET NULL"))
 
     components: Mapped[list["DegreeComponent"]] = relationship(back_populates="degree", cascade="all, delete-orphan")
     semesters: Mapped[list["Semester"]] = relationship(back_populates="degree", cascade="all, delete-orphan")
@@ -206,7 +225,7 @@ class TimerSession(TimestampMixin, Base):
     pauses: Mapped[int] = mapped_column(Integer, default=0)
     active_seconds: Mapped[int] = mapped_column(Integer, default=0)
     wall_seconds: Mapped[int | None] = mapped_column(Integer)
-    # finished (Finalizar) | reset (Zerar) | vazio = em andamento
+    # finished (Finalizar) | reset (Zerar, só sessões antigas; desde a v1.7.2 Cancelar apaga) | vazio = em andamento
     end_reason: Mapped[str | None] = mapped_column(String(20))
     notes: Mapped[str | None] = mapped_column(Text)
 

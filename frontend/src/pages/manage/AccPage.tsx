@@ -1,4 +1,4 @@
-import { Info, Pencil, Plus } from "lucide-react";
+import { Info, Pencil, Plus, Trash2 } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 
@@ -6,6 +6,7 @@ import { RecordList } from "@/components/manage/RecordList";
 import { InlineMeter } from "@/components/panel/InlineMeter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardEyebrow } from "@/components/ui/card";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input, Textarea } from "@/components/ui/input";
@@ -19,6 +20,7 @@ export function AccPage() {
   const progress = useApi<CourseProgress>("/course/progress");
   const activities = useApi<AccActivity[]>("/acc-activities");
   const [editing, setEditing] = React.useState<AccActivity | "new" | null>(null);
+  const listRef = React.useRef<HTMLDivElement>(null);
   const acc = progress.data?.acc;
   const degreeId = progress.data?.degree.id;
 
@@ -32,7 +34,9 @@ export function AccPage() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Atividades complementares</h1>
-          <p className="text-sm text-muted-foreground">Horas de ACC (AAC no histórico) contra o total exigido pelo curso.</p>
+          <p className="text-sm text-muted-foreground">
+            Horas de ACC (AAC no histórico) contra o total exigido pelo curso.
+          </p>
         </div>
         <Button onClick={() => setEditing("new")} disabled={!degreeId}>
           <Plus aria-hidden="true" />
@@ -48,7 +52,10 @@ export function AccPage() {
               <p className="text-2xl font-semibold tabular-nums">
                 {formatNumber(acc.counted_hours, 1)}h
                 {acc.required_hours !== null && (
-                  <span className="text-sm font-normal text-muted-foreground"> de {formatNumber(acc.required_hours)}h</span>
+                  <span className="text-sm font-normal text-muted-foreground">
+                    {" "}
+                    de {formatNumber(acc.required_hours)}h
+                  </span>
                 )}
               </p>
               {acc.required_hours ? (
@@ -89,32 +96,45 @@ export function AccPage() {
         </section>
       )}
 
-      <RecordList
-        caption="Atividades complementares"
-        rows={activities.data ?? []}
-        rowKey={(a) => a.id}
-        title={(a) => a.title}
-        empty="Nenhuma atividade cadastrada."
-        columns={[
-          { header: "Categoria", cell: (a) => a.category ?? "—", inCard: true },
-          {
-            header: "Data",
-            cell: (a) =>
-              a.activity_date ? formatDayMonth(parseLocalDate(a.activity_date)) + "/" + a.activity_date.slice(0, 4) : "—",
-            inCard: true,
-          },
-          { header: "Horas", cell: (a) => `${formatNumber(a.hours, 1)}h`, numeric: true, inCard: true },
-          { header: "Situação", cell: (a) => (a.status === "registered" ? "Lançada" : "Planejada") },
-        ]}
-        actions={(a) => (
-          <Button variant="ghost" size="sm" onClick={() => setEditing(a)}>
-            <Pencil aria-hidden="true" />
-            Editar
-          </Button>
-        )}
-      />
+      {/* Resposta 06 do DS: depois de excluir, o foco volta para a lista */}
+      <div ref={listRef} tabIndex={-1} aria-label="Lista de atividades" className="focus:outline-none">
+        <RecordList
+          caption="Atividades complementares"
+          rows={activities.data ?? []}
+          rowKey={(a) => a.id}
+          title={(a) => a.title}
+          empty="Nenhuma atividade cadastrada."
+          columns={[
+            { header: "Categoria", cell: (a) => a.category ?? "—", inCard: true },
+            {
+              header: "Data",
+              cell: (a) =>
+                a.activity_date
+                  ? formatDayMonth(parseLocalDate(a.activity_date)) + "/" + a.activity_date.slice(0, 4)
+                  : "—",
+              inCard: true,
+            },
+            { header: "Horas", cell: (a) => `${formatNumber(a.hours, 1)}h`, numeric: true, inCard: true },
+            { header: "Situação", cell: (a) => (a.status === "registered" ? "Lançada" : "Planejada") },
+          ]}
+          actions={(a) => (
+            <Button variant="ghost" size="sm" onClick={() => setEditing(a)}>
+              <Pencil aria-hidden="true" />
+              Editar
+            </Button>
+          )}
+        />
+      </div>
 
-      {degreeId && <AccDialog editing={editing} degreeId={degreeId} onClose={() => setEditing(null)} onSaved={reload} />}
+      {degreeId && (
+        <AccDialog
+          editing={editing}
+          degreeId={degreeId}
+          onClose={() => setEditing(null)}
+          onSaved={reload}
+          onDeleted={() => listRef.current?.focus()}
+        />
+      )}
     </div>
   );
 }
@@ -124,15 +144,27 @@ function AccDialog({
   degreeId,
   onClose,
   onSaved,
+  onDeleted,
 }: {
   editing: AccActivity | "new" | null;
   degreeId: number;
   onClose: () => void;
   onSaved: () => void;
+  onDeleted?: () => void;
 }) {
   const item = editing === "new" ? null : editing;
-  const [v, setV] = React.useState({ title: "", category: "", hours: "", date: "", path: "", status: "registered", notes: "" });
+  const [v, setV] = React.useState({
+    title: "",
+    category: "",
+    hours: "",
+    date: "",
+    path: "",
+    status: "registered",
+    notes: "",
+  });
   const [error, setError] = React.useState<string>();
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const deleted = React.useRef(false);
 
   React.useEffect(() => {
     setError(undefined);
@@ -173,14 +205,37 @@ function AccDialog({
     }
   };
 
+  // v1.7.2: excluir uma atividade lançada por engano (com confirmação)
+  const remove = async () => {
+    if (!item) return;
+    await api.del(`/acc-activities/${item.id}`);
+    deleted.current = true;
+    toast.success("Atividade excluída");
+    onSaved();
+    onClose();
+  };
+
   return (
     <Dialog open={editing !== null} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent title={item ? "Editar atividade" : "Nova atividade"}>
+      <DialogContent
+        title={item ? "Editar atividade" : "Nova atividade"}
+        onCloseAutoFocus={(e) => {
+          if (!deleted.current) return;
+          deleted.current = false;
+          e.preventDefault();
+          onDeleted?.();
+        }}
+      >
         <form onSubmit={save} className="grid grid-cols-1 gap-4" noValidate>
           <Field id="a-title" label="Atividade">
             {() => <Input id="a-title" value={v.title} onChange={(e) => setV({ ...v, title: e.target.value })} />}
           </Field>
-          <Field id="a-cat" label="Categoria" optional hint="Use o nome da categoria do regulamento, quando ele chegar.">
+          <Field
+            id="a-cat"
+            label="Categoria"
+            optional
+            hint="Use o nome da categoria do regulamento, quando ele chegar."
+          >
             {(d) => (
               <Input
                 id="a-cat"
@@ -192,15 +247,27 @@ function AccDialog({
           </Field>
           <Field id="a-hours" label="Horas">
             {() => (
-              <Input id="a-hours" inputMode="decimal" value={v.hours} onChange={(e) => setV({ ...v, hours: e.target.value })} />
+              <Input
+                id="a-hours"
+                inputMode="decimal"
+                value={v.hours}
+                onChange={(e) => setV({ ...v, hours: e.target.value })}
+              />
             )}
           </Field>
           <Field id="a-date" label="Data" optional>
-            {() => <Input id="a-date" type="date" value={v.date} onChange={(e) => setV({ ...v, date: e.target.value })} />}
+            {() => (
+              <Input id="a-date" type="date" value={v.date} onChange={(e) => setV({ ...v, date: e.target.value })} />
+            )}
           </Field>
           <Field id="a-path" label="Caminho do certificado" optional hint="Ex.: D:\Cursos\…\certificado.pdf">
             {(d) => (
-              <Input id="a-path" aria-describedby={d} value={v.path} onChange={(e) => setV({ ...v, path: e.target.value })} />
+              <Input
+                id="a-path"
+                aria-describedby={d}
+                value={v.path}
+                onChange={(e) => setV({ ...v, path: e.target.value })}
+              />
             )}
           </Field>
           <Field id="a-status" label="Situação">
@@ -232,7 +299,26 @@ function AccDialog({
               Salvar
             </Button>
           </div>
+          {item && (
+            <Button type="button" variant="ghost" className="justify-self-start" onClick={() => setConfirmDelete(true)}>
+              <Trash2 aria-hidden="true" />
+              Excluir atividade
+            </Button>
+          )}
         </form>
+        <ConfirmDialog
+          open={confirmDelete}
+          onOpenChange={setConfirmDelete}
+          title="Excluir esta atividade?"
+          note={
+            item
+              ? `"${item.title}" (${formatNumber(item.hours)}h) sai da lista e das horas de ACC. Não dá para desfazer.`
+              : undefined
+          }
+          confirmLabel="Excluir atividade"
+          destructive
+          onConfirm={remove}
+        />
       </DialogContent>
     </Dialog>
   );

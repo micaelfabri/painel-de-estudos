@@ -22,7 +22,8 @@ export const buttonVariants = cva(
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         outline: "border border-border bg-card text-primary-text hover:bg-accent",
         ghost: "text-foreground hover:bg-muted",
-        destructive: "bg-destructive text-white hover:bg-destructive/90",
+        // provisório até a correção no padrão de design: branco sobre --destructive dava 3,76:1
+        destructive: "bg-destructive-text text-background hover:bg-destructive-text/90",
         link: "text-primary-text underline-offset-4 hover:underline focus-visible:underline",
       },
       size: {

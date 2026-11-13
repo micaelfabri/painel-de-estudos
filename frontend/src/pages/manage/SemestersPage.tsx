@@ -19,7 +19,8 @@ export function SemestersPage() {
   const semesters = useApi<Semester[]>("/semesters");
   const progress = useApi<CourseProgress>("/course/progress");
   const [editing, setEditing] = React.useState<Semester | null | "new">(null);
-  const degree = degrees.data?.[0];
+  // v1.8 (D38): só a graduação; os cursos têm a área própria
+  const degree = degrees.data?.find((d) => d.kind === "degree");
 
   return (
     <div className="space-y-6">
@@ -47,7 +48,11 @@ export function SemestersPage() {
         empty="Nenhum semestre cadastrado."
         columns={[
           { header: "Atual", cell: (s) => (s.is_current ? "Sim" : "Não"), inCard: true },
-          { header: "Início", cell: (s) => (s.start_date ? formatDayMonth(parseLocalDate(s.start_date)) : "—"), inCard: true },
+          {
+            header: "Início",
+            cell: (s) => (s.start_date ? formatDayMonth(parseLocalDate(s.start_date)) : "—"),
+            inCard: true,
+          },
           { header: "Fim", cell: (s) => (s.end_date ? formatDayMonth(parseLocalDate(s.end_date)) : "—"), inCard: true },
         ]}
         actions={(s) => (
@@ -63,10 +68,15 @@ export function SemestersPage() {
           <h2 id="h-sem-semestre" className="text-lg font-semibold">
             Disciplinas ainda sem semestre ({progress.data.unscheduled.length})
           </h2>
-          <p className="text-sm text-muted-foreground">A divisão por semestre depende da matriz curricular (currículo 202202).</p>
+          <p className="text-sm text-muted-foreground">
+            A divisão por semestre depende da matriz curricular (currículo 202202).
+          </p>
           <ul className="grid gap-2 sm:grid-cols-2">
             {progress.data.unscheduled.map((s) => (
-              <li key={s.id} className="flex justify-between gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm">
+              <li
+                key={s.id}
+                className="flex justify-between gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
+              >
                 <span>{s.name}</span>
                 <span className="shrink-0 tabular-nums text-muted-foreground">{s.hours ? `${s.hours}h` : "—"}</span>
               </li>
@@ -162,10 +172,19 @@ function SemesterDialog({
             )}
           </Field>
           <Field id="sem-start" label="Início" optional>
-            {() => <Input id="sem-start" type="date" value={v.start} onChange={(e) => setV({ ...v, start: e.target.value })} />}
+            {() => (
+              <Input
+                id="sem-start"
+                type="date"
+                value={v.start}
+                onChange={(e) => setV({ ...v, start: e.target.value })}
+              />
+            )}
           </Field>
           <Field id="sem-end" label="Fim" optional>
-            {() => <Input id="sem-end" type="date" value={v.end} onChange={(e) => setV({ ...v, end: e.target.value })} />}
+            {() => (
+              <Input id="sem-end" type="date" value={v.end} onChange={(e) => setV({ ...v, end: e.target.value })} />
+            )}
           </Field>
           <CheckboxRow id="sem-current" checked={v.current} onCheckedChange={(c) => setV({ ...v, current: c })}>
             Semestre atual (aparece no painel)

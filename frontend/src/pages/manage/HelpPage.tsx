@@ -8,7 +8,7 @@ const SECTIONS: { title: string; items: string[] }[] = [
     items: [
       "Abra o Docker Desktop e o LM Studio (Developer → Local Server → Status: Running).",
       "No PowerShell, na pasta do projeto: docker compose up. Abra http://localhost:8000.",
-      'No painel do agente, clique em "Montar o dia": entram os retestes vencidos e o próximo passo de estudo.',
+      'No painel do agente, clique em "Montar o dia": entram os retestes vencidos e o próximo passo de estudo. Tarefas não feitas de dias anteriores: "Trazer para hoje".',
     ],
   },
   {
@@ -51,11 +51,11 @@ const SECTIONS: { title: string; items: string[] }[] = [
   {
     title: "Cards",
     items: [
-      "Estudo → Cards → \"Gerar cards dos meus pontos fracos\": 10 cards dos erros não corrigidos e dos temas abaixo de 70%.",
-      "\"De prints ou de vídeo\": cards das questões erradas nos prints ou de uma transcrição de vídeo (.vtt, .srt, .txt ou colada).",
+      'Estudo → Cards → "Gerar cards dos meus pontos fracos": 10 cards dos erros não corrigidos e dos temas abaixo de 70%.',
+      '"De prints ou de vídeo": cards das questões erradas nos prints ou de uma transcrição de vídeo (.vtt, .srt, .txt ou colada).',
       "Responder (4 alternativas) ou Virar (Sabia/Não sabia). Card de um erro: errou = revisar de novo; acertou = corrigido.",
-      "Cada card volta em 1, 7, 21 e 60 dias; \"Não sabia\" volta para 1 dia. Rodada rápida: 10 cards com tempo e sequência.",
-      "O card do dia fica no Painel. \"Notion\" acrescenta os cards na página do tema, sem apagar nada.",
+      'Cada card volta em 1, 7, 21 e 60 dias; "Não sabia" volta para 1 dia. Rodada rápida: 10 cards com tempo e sequência.',
+      'O card do dia fica no Painel. "Notion" acrescenta os cards na página do tema, sem apagar nada.',
     ],
   },
   {
@@ -64,7 +64,18 @@ const SECTIONS: { title: string; items: string[] }[] = [
       "Estudo → Provas e prazos: tudo numa lista. Marcar a caixa pede confirmação.",
       "Resultado: o painel lê os prints (Notion ou pasta de materiais) e propõe a nota; você confirma. Simulado vale até 1,0 ponto.",
       "O card de cada disciplina mostra a nota prevista e quanto falta na AV/AVS para passar, pela regra da disciplina.",
-      "Desempenho: filtre por período e disciplina; clique numa barra para ver o dia e num ponto para abrir o teste.",
+      "Desempenho: filtre por período e disciplina; clique numa barra para ver o dia (com as tarefas do checklist daquele dia) e num ponto para abrir o teste.",
+    ],
+  },
+  {
+    title: "Cursos e certificados",
+    items: [
+      "Cursos fora da faculdade (livres, certificações, idiomas, bootcamps) ficam no grupo próprio do menu; o Painel continua só com a faculdade.",
+      'Meus cursos: "Novo curso" com plataforma, tipo, carga horária e número de módulos. Abas por situação: Fazendo, Quero fazer, Pausado, Concluído.',
+      'Na página do curso: marque as aulas vistas, cole o texto da aula para gerar questões e cards, e use o cronômetro (os módulos aparecem como "Curso: …").',
+      'As horas dos cursos têm meta própria (5h por semana, em Configurações) e não entram na meta da faculdade. Para os cursos entrarem em "Montar o dia", ligue em Configurações.',
+      "Histórico, Cards e Desempenho do grupo mostram só os cursos. A prova de certificação aparece só aqui, não em Provas e prazos.",
+      'Curso que conta como AAC: ao concluir, "Lançar como AAC" cria a atividade em Atividades complementares, uma vez só.',
     ],
   },
   {
@@ -73,8 +84,8 @@ const SECTIONS: { title: string; items: string[] }[] = [
       "Disciplinas e temas: disciplina, regra de avaliação, progresso do portal e lista de temas.",
       "Provas e prazos: data, hora e local de cada prova; aparecem nos cards e na faixa de 14 dias.",
       "Semestres e curso: semestre atual e progresso do curso.",
-      "Atividades complementares: horas de ACC lançadas e planejadas contra o total exigido.",
-      "Configurações: metas, modelo local, teste de leitura de imagem, links do rodapé, integrações e registro de uso.",
+      "Atividades complementares: horas de ACC lançadas e planejadas contra o total exigido; para tirar uma, Editar › Excluir atividade.",
+      "Configurações: metas (faculdade e cursos), modelo local, teste de leitura de imagem, links do rodapé, integrações e registro de uso.",
       '"Mandar provas para a agenda" lista as provas antes; só vão as marcadas.',
     ],
   },

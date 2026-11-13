@@ -58,7 +58,8 @@ def acc_summary(session: Session, degree_id: int, required: int | None) -> dict:
 @router.get("/progress")
 def course_progress(degree_id: int | None = None, session: Session = Depends(get_session)):
     degree = session.get(models.Degree, degree_id) if degree_id else session.scalars(
-        select(models.Degree).where(models.Degree.status == "active").order_by(models.Degree.id)).first()
+        select(models.Degree).where(models.Degree.kind == "degree", models.Degree.status == "active")
+        .order_by(models.Degree.id)).first()
     if degree is None:
         raise HTTPException(404, "nenhuma graduação cadastrada")
 

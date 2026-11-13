@@ -15,6 +15,10 @@ const CardsPage = React.lazy(() => import("@/pages/CardsPage").then((m) => ({ de
 const PerformancePage = React.lazy(() =>
   import("@/pages/PerformancePage").then((m) => ({ default: m.PerformancePage })),
 );
+const CoursesPage = React.lazy(() => import("@/pages/CoursesPage").then((m) => ({ default: m.CoursesPage })));
+const CourseDetailPage = React.lazy(() =>
+  import("@/pages/CourseDetailPage").then((m) => ({ default: m.CourseDetailPage })),
+);
 const AccPage = React.lazy(() => import("@/pages/manage/AccPage").then((m) => ({ default: m.AccPage })));
 const ExamsPage = React.lazy(() => import("@/pages/manage/ExamsPage").then((m) => ({ default: m.ExamsPage })));
 const HelpPage = React.lazy(() => import("@/pages/manage/HelpPage").then((m) => ({ default: m.HelpPage })));
@@ -42,6 +46,12 @@ export function App() {
             <Route path="/estudo/historico" element={<HistoryPage />} />
             <Route path="/estudo/cards" element={<CardsPage />} />
             <Route path="/estudo/desempenho" element={<PerformancePage />} />
+            {/* v1.8 (D38): Cursos e certificados reaproveita as páginas da faculdade com area="cursos" */}
+            <Route path="/cursos" element={<CoursesPage />} />
+            <Route path="/cursos/historico" element={<HistoryPage area="cursos" />} />
+            <Route path="/cursos/cards" element={<CardsPage area="cursos" />} />
+            <Route path="/cursos/desempenho" element={<PerformancePage area="cursos" />} />
+            <Route path="/cursos/:id" element={<CourseDetailPage />} />
             <Route path="/gerenciar" element={<Navigate to="/gerenciar/disciplinas" replace />} />
             <Route path="/gerenciar/disciplinas" element={<SubjectsPage />} />
             <Route path="/gerenciar/provas" element={<ExamsPage />} />

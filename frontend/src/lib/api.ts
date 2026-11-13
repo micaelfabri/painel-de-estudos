@@ -672,6 +672,7 @@ export interface DayDetail {
   seconds: number;
   chunks: { started_at: string; ended_at: string | null; seconds: number; subject_name: string | null }[];
   sets: HistorySet[];
+  tasks: { id: number; label: string; done: boolean; planned_minutes: number | null }[];
 }
 
 export interface ChatMessageView {
@@ -737,4 +738,86 @@ export interface CardsSummary {
     knew: number;
     has_notion: boolean;
   }[];
+}
+
+// --- v1.8: cursos e certificados (SPEC §18) ---------------------------------------
+
+export type Area = "faculdade" | "cursos";
+export type CourseType = "course_certificate" | "certification" | "language" | "bootcamp" | "free";
+export type CourseStatus = "wishlist" | "doing" | "paused" | "done";
+
+export interface CourseLesson {
+  id: number;
+  title: string;
+  done: boolean;
+  has_text: boolean;
+  last_score: number | null;
+  notion_page_id: string | null;
+  learning_status: string;
+}
+
+export interface CourseModule {
+  id: number;
+  name: string;
+  status: string;
+  number: number;
+  lessons: CourseLesson[];
+}
+
+export interface Course {
+  id: number;
+  name: string;
+  platform: string | null;
+  course_type: CourseType;
+  type_label: string;
+  url: string | null;
+  course_status: CourseStatus;
+  status_label: string;
+  total_hours: number | null;
+  start_date: string | null;
+  target_date: string | null;
+  days_to_target: number | null;
+  certificate_path: string | null;
+  counts_acc: boolean;
+  acc_category: string | null;
+  notion_page_id: string | null;
+  notion_url: string | null;
+  exam_at: string | null;
+  days_to_exam: number | null;
+  manual_progress: number | null;
+  notes: string | null;
+  finished_on: string | null;
+  acc_activity_id: number | null;
+  modules_total: number;
+  modules_done: number;
+  progress: number;
+  seconds: number;
+  week_seconds: number;
+  sets: number;
+  average_score: number | null;
+  cards: number;
+  next_lesson: {
+    module_id: number;
+    module: string;
+    module_number: number;
+    topic_id: number | null;
+    title: string | null;
+  } | null;
+  modules?: CourseModule[];
+}
+
+export interface CoursesSummary {
+  week_seconds: number;
+  goal_hours: number | null;
+  certificates: number;
+  acc_hours: number;
+  counts: Record<CourseStatus, number>;
+  next_exam: { course_id: number; name: string; exam_at: string; days: number } | null;
+}
+
+export interface CourseModuleOption {
+  id: number;
+  name: string;
+  course_id: number;
+  course_name: string;
 }

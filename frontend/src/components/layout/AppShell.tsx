@@ -14,6 +14,7 @@ import {
   PanelLeft,
   Settings,
   Sun,
+  type LucideIcon,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import * as React from "react";
@@ -25,14 +26,44 @@ import { cn } from "@/lib/utils";
 import { AppFooter } from "./AppFooter";
 import { ModeSwitch, modeFromPath } from "./ModeSwitch";
 
+type NavItem = {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  end?: boolean;
+  /** Ativo também em subpáginas (ex.: Meus cursos na página de um curso) */
+  match?: (path: string) => boolean;
+};
+
+// v1.8 (D38): no Estudo, dois grupos — a faculdade e os cursos fora dela
+const STUDY_GROUPS: { label: string; items: NavItem[] }[] = [
+  {
+    label: "Faculdade",
+    items: [
+      { to: "/estudo", label: "Painel", icon: LayoutDashboard, end: true },
+      { to: "/estudo/provas", label: "Provas e prazos", icon: CalendarClock },
+      { to: "/estudo/historico", label: "Histórico", icon: History },
+      { to: "/estudo/cards", label: "Cards", icon: Layers },
+      { to: "/estudo/desempenho", label: "Desempenho", icon: BarChart3 },
+    ],
+  },
+  {
+    label: "Cursos e certificados",
+    items: [
+      {
+        to: "/cursos",
+        label: "Meus cursos",
+        icon: GraduationCap,
+        match: (p) => p === "/cursos" || /^\/cursos\/\d+/.test(p),
+      },
+      { to: "/cursos/historico", label: "Histórico", icon: History },
+      { to: "/cursos/cards", label: "Cards", icon: Layers },
+      { to: "/cursos/desempenho", label: "Desempenho", icon: BarChart3 },
+    ],
+  },
+];
+
 const NAV = {
-  study: [
-    { to: "/estudo", label: "Painel", icon: LayoutDashboard, end: true },
-    { to: "/estudo/provas", label: "Provas e prazos", icon: CalendarClock },
-    { to: "/estudo/historico", label: "Histórico", icon: History },
-    { to: "/estudo/cards", label: "Cards", icon: Layers },
-    { to: "/estudo/desempenho", label: "Desempenho", icon: BarChart3 },
-  ],
   manage: [
     {
       to: "/gerenciar/disciplinas",
@@ -47,15 +78,76 @@ const NAV = {
   ],
 };
 
+function NavItemLink({
+  item,
+  collapsed,
+  onNavigate,
+  pathname,
+}: {
+  item: NavItem;
+  collapsed?: boolean;
+  onNavigate?: () => void;
+  pathname: string;
+}) {
+  const { to, label, icon: Icon, end, match } = item;
+  return (
+    <NavLink
+      to={to}
+      end={end ?? !!match}
+      onClick={onNavigate}
+      title={collapsed ? label : undefined}
+      className={({ isActive }) =>
+        cn(
+          "flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 sm:min-h-0",
+          isActive || match?.(pathname) ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted",
+          focusRing,
+        )
+      }
+    >
+      <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+      <span className={cn(collapsed && "sr-only")}>{label}</span>
+    </NavLink>
+  );
+}
+
 function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
-  const mode = modeFromPath(useLocation().pathname);
+  const pathname = useLocation().pathname;
+  const mode = modeFromPath(pathname);
+  if (mode === "study")
+    return (
+      <nav role="navigation" aria-label="Seções" className="flex flex-col gap-1 p-2">
+        {STUDY_GROUPS.map((group, i) => (
+          <div key={group.label} role="group" aria-labelledby={`nav-group-${i}`} className="flex flex-col gap-1">
+            {i > 0 && <div className="my-2 h-px bg-border" aria-hidden="true" />}
+            <p
+              id={`nav-group-${i}`}
+              className={cn(
+                "px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wider text-muted-foreground",
+                collapsed && "sr-only",
+              )}
+            >
+              {group.label}
+            </p>
+            {group.items.map((item) => (
+              <NavItemLink
+                key={item.to}
+                item={item}
+                collapsed={collapsed}
+                onNavigate={onNavigate}
+                pathname={pathname}
+              />
+            ))}
+          </div>
+        ))}
+      </nav>
+    );
   return (
     <nav role="navigation" aria-label="Seções" className="flex flex-col gap-1 p-2">
-      {NAV[mode].map(({ to, label, icon: Icon, ...rest }) => (
+      {NAV.manage.map(({ to, label, icon: Icon }) => (
         <NavLink
           key={to}
           to={to}
-          end={"end" in rest ? rest.end : false}
+          end={false}
           onClick={onNavigate}
           title={collapsed ? label : undefined}
           className={({ isActive }) =>

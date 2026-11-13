@@ -4,10 +4,13 @@ import { toast } from "sonner";
 
 import { StatusBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import { Card } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Select } from "@/components/ui/select";
 import { api, type MistakeCounts, type MistakeReview } from "@/lib/api";
+import { useArea } from "@/lib/area";
+import { usePaged } from "@/lib/usePaged";
 import { MISTAKE_STATUS, mistakeSummary } from "@/lib/mistakes";
 import { useAgent } from "./AgentContext";
 
@@ -27,6 +30,8 @@ const FILTERS: { value: string; label: string; status: string }[] = [
  */
 export function ReviewMistakes({ onClose }: { onClose: () => void }) {
   const { startSet, pending, learningVersion } = useAgent();
+  // v1.8 (D38): os erros da área da página aberta (faculdade ou cursos)
+  const area = useArea();
   const [filter, setFilter] = React.useState("todo");
   const [items, setItems] = React.useState<MistakeReview[] | null>(null);
   const [counts, setCounts] = React.useState<MistakeCounts | null>(null);
@@ -34,14 +39,14 @@ export function ReviewMistakes({ onClose }: { onClose: () => void }) {
   const status = FILTERS.find((f) => f.value === filter)!.status;
   const load = React.useCallback(() => {
     api
-      .get<MistakeReview[]>(`/learning/mistakes?status=${status}`)
+      .get<MistakeReview[]>(`/learning/mistakes?status=${status}&area=${area}`)
       .then(setItems)
       .catch(() => setItems([]));
     api
-      .get<MistakeCounts>("/learning/mistakes/summary")
+      .get<MistakeCounts>(`/learning/mistakes/summary?area=${area}`)
       .then(setCounts)
       .catch(() => setCounts(null));
-  }, [status]);
+  }, [status, area]);
 
   React.useEffect(() => load(), [load, learningVersion]);
 
@@ -56,11 +61,18 @@ export function ReviewMistakes({ onClose }: { onClose: () => void }) {
   };
 
   const unfixed = counts ? counts.open + counts.reviewed + counts.again : 0;
+  // v1.7.2: 10 erros por página; volta para a 1 ao trocar o filtro
+  const paged = usePaged(items ?? [], filter);
 
   return (
     <section aria-labelledby="h-revisar" className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <h3 id="h-revisar" className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <h3
+          id="h-revisar"
+          ref={paged.anchor as React.RefObject<HTMLHeadingElement>}
+          tabIndex={-1}
+          className="scroll-mt-4 text-xs font-medium uppercase tracking-wider text-muted-foreground focus:outline-none"
+        >
           Revisar erros
         </h3>
         <Button variant="ghost" size="sm" onClick={onClose}>
@@ -77,7 +89,7 @@ export function ReviewMistakes({ onClose }: { onClose: () => void }) {
             userText: "Refazer os erros que ainda não corrigi.",
             pendingLabel: "Separando os erros…",
             path: "/agent/mistakes/redo",
-            body: {},
+            body: { area },
           })
         }
       >
@@ -90,7 +102,7 @@ export function ReviewMistakes({ onClose }: { onClose: () => void }) {
 
       {items === null && <p className="text-sm text-muted-foreground">Carregando…</p>}
       {items?.length === 0 && <p className="text-sm text-muted-foreground">Nenhum erro aqui.</p>}
-      {items?.map((m) => (
+      {paged.slice.map((m) => (
         <Card key={m.id} className="space-y-3 p-4">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <p className="text-xs text-muted-foreground">
@@ -143,6 +155,13 @@ export function ReviewMistakes({ onClose }: { onClose: () => void }) {
           )}
         </Card>
       ))}
+      <Pagination
+        page={paged.page}
+        pages={paged.pages}
+        total={paged.total}
+        onPage={paged.goTo}
+        label="Páginas dos erros"
+      />
     </section>
   );
 }

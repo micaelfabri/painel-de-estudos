@@ -52,7 +52,8 @@ export type TimerState = "idle" | "running" | "paused" | "past_goal" | "alarm";
 /**
  * Cronômetro de estudo. Cada trecho entre Iniciar e Pausar vira um trecho salvo na API
  * (SPEC §6.1). Desde a v1.4 (D24) os trechos ficam dentro de uma sessão do cronômetro,
- * que conta as pausas e um relógio "oculto" do primeiro Iniciar até Finalizar ou Zerar.
+ * que conta as pausas e um relógio "oculto" do primeiro Iniciar até Finalizar. Desde a v1.7.2, Cancelar
+ * descarta a sessão e os trechos (o antigo Zerar salvava o tempo, e um Iniciar por engano virava sessão de 0 min).
  */
 const ALARM_REPEAT = 10 * 60; // segundos entre repetições do alarme
 
@@ -61,6 +62,7 @@ export function useStudyTimer(
   alarmMinutes: number,
   onSaved?: (seconds: number) => void,
   onClosed?: (session: TimerSessionView) => void,
+  onCancelled?: () => void,
 ) {
   const [state, setState] = React.useState<StoredTimer>(load);
   const [now, setNow] = React.useState(() => Date.now());
@@ -144,7 +146,7 @@ export function useStudyTimer(
     }
   };
 
-  /** Fecha o trecho atual; `countPause` = foi o botão Pausar (Finalizar/Zerar não contam como pausa) */
+  /** Fecha o trecho atual; `countPause` = foi o botão Pausar (Finalizar não conta como pausa) */
   const stopChunk = async (countPause: boolean) => {
     const chunkStart = state.chunkStart ?? Date.now();
     const seconds = Math.floor((Date.now() - chunkStart) / 1000);
@@ -157,7 +159,7 @@ export function useStudyTimer(
 
   const pause = () => stopChunk(true);
 
-  const close = async (reason: "finished" | "reset") => {
+  const close = async (reason: "finished") => {
     if (state.running) await stopChunk(false);
     const timerId = await timerIdNow();
     opening.current = null;
@@ -171,8 +173,16 @@ export function useStudyTimer(
     }
   };
 
-  const reset = () => close("reset");
   const finish = () => close("finished");
+
+  /** v1.7.2: descarta a sessão (o trecho em andamento não é salvo; os já salvos são apagados no servidor) */
+  const cancel = async () => {
+    const timerId = await timerIdNow();
+    opening.current = null;
+    setState((s) => ({ ...EMPTY, subjectId: s.subjectId }));
+    if (timerId) await api.del(`/study/timer-sessions/${timerId}`);
+    onCancelled?.();
+  };
 
   const setSubject = (subjectId: number | null) => {
     setState((s) => ({ ...s, subjectId }));
@@ -189,8 +199,8 @@ export function useStudyTimer(
     pauses: state.pauses ?? 0,
     start,
     pause,
-    reset,
     finish,
+    cancel,
     setSubject,
   };
 }

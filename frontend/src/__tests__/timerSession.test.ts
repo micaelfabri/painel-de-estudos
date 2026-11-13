@@ -4,8 +4,13 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 vi.mock("@/lib/sound", () => ({ playGoal: vi.fn(), playAlarm: vi.fn(), unlockAudio: vi.fn() }));
 const post = vi.fn();
 const patch = vi.fn();
+const del = vi.fn();
 vi.mock("@/lib/api", () => ({
-  api: { post: (...a: unknown[]) => post(...a), patch: (...a: unknown[]) => patch(...a) },
+  api: {
+    post: (...a: unknown[]) => post(...a),
+    patch: (...a: unknown[]) => patch(...a),
+    del: (...a: unknown[]) => del(...a),
+  },
 }));
 
 import { useStudyTimer } from "@/components/panel/useStudyTimer";
@@ -73,4 +78,21 @@ test("pausa antes do servidor criar a sessão ainda liga o trecho a ela (v1.5)",
   });
   expect(post).toHaveBeenCalledWith("/study-sessions", expect.objectContaining({ seconds: 5, timer_session_id: 9 }));
   expect(patch).toHaveBeenCalledWith("/study/timer-sessions/9", { pauses: 1 });
+});
+
+test("Cancelar descarta a sessão: não salva o trecho em andamento e apaga a sessão (v1.7.2)", async () => {
+  del.mockResolvedValue(undefined);
+  const cancelled = vi.fn();
+  const closed = vi.fn();
+  const { result } = renderHook(() => useStudyTimer(90, 120, undefined, closed, cancelled));
+  await act(async () => result.current.start());
+  act(() => vi.advanceTimersByTime(30_000));
+  await act(async () => result.current.cancel());
+  expect(post).not.toHaveBeenCalledWith("/study-sessions", expect.anything());
+  expect(del).toHaveBeenCalledWith("/study/timer-sessions/7");
+  expect(patch).not.toHaveBeenCalledWith("/study/timer-sessions/7", expect.objectContaining({ end_reason: expect.anything() }));
+  expect(cancelled).toHaveBeenCalled();
+  expect(closed).not.toHaveBeenCalled();
+  expect(result.current.status).toBe("idle");
+  expect(result.current.elapsed).toBe(0);
 });

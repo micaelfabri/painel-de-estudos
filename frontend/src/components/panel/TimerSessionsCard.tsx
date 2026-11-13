@@ -1,24 +1,44 @@
 import { useAgent } from "@/components/agent/AgentContext";
 import { Card, CardContent, CardEyebrow } from "@/components/ui/card";
-import type { TimerSessionView } from "@/lib/api";
+import type { Area, TimerSessionView } from "@/lib/api";
 import { formatDayMonth, formatDuration, formatTime, parseLocalDateTime } from "@/lib/format";
+import { PER_PAGE, usePaged } from "@/lib/usePaged";
 import { useApi } from "@/lib/useApi";
+import { Pagination } from "@/components/ui/pagination";
 import * as React from "react";
 
-/** Sessões do cronômetro (SPEC D24): tempo estudado, tempo total (relógio oculto) e pausas */
-export function TimerSessionsCard({ limit = 8, version = 0 }: { limit?: number; version?: number }) {
-  const sessions = useApi<TimerSessionView[]>(`/study/timer-sessions?limit=${limit}`);
+/**
+ * Sessões do cronômetro (SPEC D24): tempo estudado, tempo total (relógio oculto) e pausas.
+ * v1.7.2: sem `limit` mostra todas, em páginas de 10 (Desempenho); com `limit`, só as últimas (Painel).
+ */
+export function TimerSessionsCard({
+  limit,
+  version = 0,
+  area = "faculdade",
+}: {
+  limit?: number;
+  version?: number;
+  area?: Area;
+}) {
+  const sessions = useApi<TimerSessionView[]>(`/study/timer-sessions?limit=${limit ?? 1000}&area=${area}`);
   const { learningVersion } = useAgent();
   const reload = sessions.reload;
   React.useEffect(() => {
     if (version > 0 || learningVersion > 0) void reload();
   }, [version, learningVersion, reload]);
-  const rows = sessions.data ?? [];
+  const paged = usePaged(sessions.data ?? [], null, limit ?? PER_PAGE);
+  const rows = paged.slice;
 
   return (
     <Card>
       <CardContent className="space-y-3">
-        <CardEyebrow>Sessões do cronômetro</CardEyebrow>
+        <div
+          ref={paged.anchor as React.RefObject<HTMLDivElement>}
+          tabIndex={-1}
+          className="scroll-mt-20 focus:outline-none"
+        >
+          <CardEyebrow>Sessões do cronômetro</CardEyebrow>
+        </div>
         {rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nenhuma sessão ainda. Use Iniciar e, no fim, Finalizar.</p>
         ) : (
@@ -64,6 +84,15 @@ export function TimerSessionsCard({ limit = 8, version = 0 }: { limit?: number; 
               </tbody>
             </table>
           </div>
+        )}
+        {limit === undefined && (
+          <Pagination
+            page={paged.page}
+            pages={paged.pages}
+            total={paged.total}
+            onPage={paged.goTo}
+            label="Páginas das sessões do cronômetro"
+          />
         )}
       </CardContent>
     </Card>

@@ -256,3 +256,53 @@ def test_legacy_put_keeps_status_in_sync(fake):  # noqa: F811
     client.put(f"/api/mistakes/{m['id']}", json={**raw, "video_minute": "03:10"})
     row = client.get("/api/learning/mistakes", params={"status": "fixed"}).json()[0]
     assert row["status"] == "fixed" and row["video_minute"] == "03:10"
+
+
+def test_day_detail_keeps_the_checklist_of_past_days(client):
+    """v1.7.2: as tarefas de um dia continuam visíveis depois que o dia vira (detalhe do dia no Desempenho)."""
+    a = client.post("/api/learning/checklist", json={"day": "2026-11-10", "label": "Concluir Tema 1", "planned_minutes": 90}).json()
+    client.post("/api/learning/checklist", json={"day": "2026-11-10", "label": "Revisar erros"})
+    client.post("/api/learning/checklist", json={"day": "2026-11-11", "label": "Outro dia"})
+    client.patch(f"/api/learning/checklist/{a['id']}", json={"done": True})
+    tasks = client.get("/api/study/day", params={"day": "2026-11-10"}).json()["tasks"]
+    assert [(t["label"], t["done"], t["planned_minutes"]) for t in tasks] == [
+        ("Concluir Tema 1", True, 90), ("Revisar erros", False, None)]
+
+
+def test_carry_pending_tasks_to_today(client):
+    """v1.7.2: as não feitas de dias anteriores vêm como cópia; o dia antigo continua "não feita"."""
+    post = lambda day, label, **kw: client.post("/api/learning/checklist", json={"day": day, "label": label, **kw}).json()  # noqa: E731
+    post("2026-11-10", "Concluir Tema 1", planned_minutes=90)
+    post("2026-11-11", "Concluir Tema 1", planned_minutes=90)  # mesmo nome em dois dias: vem uma vez só
+    done = post("2026-11-11", "Ler o capítulo 2")
+    client.patch(f"/api/learning/checklist/{done['id']}", json={"done": True})
+    post("2026-11-11", "Revisar cards vencidos (9)")  # item automático: não vem
+    post("2026-11-12", "Já está hoje")
+    post("2026-11-11", "Já está hoje")
+    post("2026-10-01", "Antiga demais")  # fora dos 14 dias
+
+    pending = client.get("/api/learning/checklist/pending", params={"day": "2026-11-12"}).json()
+    assert [p["label"] for p in pending] == ["Concluir Tema 1"]
+    out = client.post("/api/learning/checklist/carry", params={"day": "2026-11-12"}).json()
+    assert out["added"] == 1
+    assert [(i["label"], i["planned_minutes"], i["done"]) for i in out["items"]] == [
+        ("Já está hoje", None, False), ("Concluir Tema 1", 90, False)]
+    # Nada mais pendente e o dia antigo continua como estava
+    assert client.get("/api/learning/checklist/pending", params={"day": "2026-11-12"}).json() == []
+    old = client.get("/api/study/day", params={"day": "2026-11-11"}).json()["tasks"]
+    assert ("Concluir Tema 1", False) in [(t["label"], t["done"]) for t in old]
+
+
+def test_cancel_timer_session_discards_its_chunks(client):
+    """v1.7.2: Cancelar apaga a sessão e os trechos dela; as horas do dia não contam esse tempo."""
+    t = client.post("/api/study/timer-sessions", json={"started_at": "2026-11-12T19:00:00"}).json()
+    client.post("/api/study-sessions", json={"started_at": "2026-11-12T19:00:00", "ended_at": "2026-11-12T19:20:00",
+                                            "seconds": 1200, "timer_session_id": t["id"]})
+    keep = client.post("/api/study-sessions", json={"started_at": "2026-11-12T21:00:00",
+                                                   "ended_at": "2026-11-12T21:10:00", "seconds": 600}).json()
+    assert client.get("/api/study/day", params={"day": "2026-11-12"}).json()["seconds"] == 1800
+    assert client.delete(f"/api/study/timer-sessions/{t['id']}").status_code == 204
+    assert client.get("/api/study/day", params={"day": "2026-11-12"}).json()["seconds"] == 600
+    assert all(s["id"] != t["id"] for s in client.get("/api/study/timer-sessions").json())
+    assert client.delete(f"/api/study/timer-sessions/{t['id']}").status_code == 404
+    assert keep["seconds"] == 600

@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from . import models, settings_store
+from . import areas, models, settings_store
 from .db import get_session
 
 RETEST_DAYS = {"retest_1d": 1, "retest_7d": 7, "retest_21d": 21}
@@ -113,28 +113,38 @@ def record_retry(session: Session, question: models.Question, correct: bool, top
     mistake.reviewed = True
 
 
-def mistake_counts(session: Session, *, topic_id: int | None = None, subject_id: int | None = None) -> dict:
-    """Erros por status (D28) de um tema ou de uma disciplina."""
-    stmt = select(models.Mistake.status)
+def mistake_counts(session: Session, *, topic_id: int | None = None, subject_id: int | None = None,
+                   area: areas.Area | None = None) -> dict:
+    """Erros por status (D28) de um tema, de uma disciplina ou de uma área (v1.8)."""
+    stmt = select(models.Mistake.status, models.Mistake.topic_id)
     if topic_id is not None:
         stmt = stmt.where(models.Mistake.topic_id == topic_id)
     if subject_id is not None:
         stmt = stmt.join(models.Topic, models.Topic.id == models.Mistake.topic_id).where(
             models.Topic.subject_id == subject_id)
     counts = dict.fromkeys(MISTAKE_STATUSES, 0)
-    for status in session.scalars(stmt).all():
+    course_ids = areas.course_subject_ids(session) if area else set()
+    topic_subject = areas.topic_subjects(session) if area else {}
+    for status, tid in session.execute(stmt).all():
+        if area and not areas.in_area(topic_subject.get(tid), area, course_ids):
+            continue
         counts[status if status in counts else "open"] += 1
     return counts
 
 
-def due_reviews(session: Session, today: date) -> list[models.ReviewSchedule]:
-    return list(
+def due_reviews(session: Session, today: date, area: areas.Area | None = None) -> list[models.ReviewSchedule]:
+    rows = list(
         session.scalars(
             select(models.ReviewSchedule)
             .where(models.ReviewSchedule.done.is_(False), models.ReviewSchedule.due_date <= today)
             .order_by(models.ReviewSchedule.due_date)
         ).all()
     )
+    if area is None:
+        return rows
+    course_ids = areas.course_subject_ids(session)
+    topic_subject = areas.topic_subjects(session)
+    return [r for r in rows if areas.in_area(topic_subject.get(r.topic_id), area, course_ids)]
 
 
 router = APIRouter(prefix="/api/learning", tags=["aprendizado"])
@@ -206,7 +216,7 @@ def topic_scores(subject_id: int | None = None, session: Session = Depends(get_s
 @router.get("/mistakes")
 def mistakes_to_review(status: str | None = Query(None, description="open,reviewed,again,fixed; padrão = sem os corrigidos"),
                        include_reviewed: bool = False, subject_id: int | None = None, topic_id: int | None = None,
-                       session: Session = Depends(get_session)):
+                       area: areas.Area | None = None, session: Session = Depends(get_session)):
     """Erros para revisar (D28). Padrão: todos menos os corrigidos; `include_reviewed` = todos."""
     wanted = [x for x in (status or "").split(",") if x in MISTAKE_STATUSES]
     if not wanted:
@@ -216,10 +226,13 @@ def mistakes_to_review(status: str | None = Query(None, description="open,review
     if topic_id is not None:
         stmt = stmt.where(models.Mistake.topic_id == topic_id)
     out = []
+    course_ids = areas.course_subject_ids(session)
     for m in session.scalars(stmt).all():
         q = session.get(models.Question, m.question_id)
         topic = session.get(models.Topic, m.topic_id)
         if subject_id is not None and topic.subject_id != subject_id:
+            continue
+        if not areas.in_area(topic.subject_id, area, course_ids):
             continue
         subject = session.get(models.Subject, topic.subject_id)
         out.append({
@@ -233,8 +246,9 @@ def mistakes_to_review(status: str | None = Query(None, description="open,review
 
 
 @router.get("/mistakes/summary")
-def mistakes_summary(subject_id: int | None = None, session: Session = Depends(get_session)):
-    return mistake_counts(session, subject_id=subject_id)
+def mistakes_summary(subject_id: int | None = None, area: areas.Area | None = None,
+                     session: Session = Depends(get_session)):
+    return mistake_counts(session, subject_id=subject_id, area=area)
 
 
 class MistakeStatusIn(BaseModel):
@@ -314,6 +328,55 @@ def delete_checklist_item(item_id: int, session: Session = Depends(get_session))
     session.commit()
 
 
+# v1.7.2: tarefas não feitas de dias anteriores podem ser trazidas para hoje. O item do dia antigo fica como
+# estava (o detalhe do dia no Desempenho mostra "não feita"); hoje ganha uma cópia.
+CARRY_DAYS = 14
+
+
+def _pending_from_past(session: Session, day: date) -> list[models.ChecklistItem]:
+    """Não feitas dos últimos 14 dias, a mais recente de cada nome, sem o que já está no dia.
+
+    Ficam de fora os retestes (voltam pelo "Montar o dia" enquanto estiverem vencidos) e o item automático
+    de cards vencidos (a contagem muda todo dia).
+    """
+    today_labels = set(session.scalars(select(models.ChecklistItem.label)
+                                       .where(models.ChecklistItem.day == day)).all())
+    rows = session.scalars(
+        select(models.ChecklistItem)
+        .where(models.ChecklistItem.day < day, models.ChecklistItem.day >= day - timedelta(days=CARRY_DAYS),
+               models.ChecklistItem.done.is_(False), models.ChecklistItem.review_id.is_(None))
+        .order_by(models.ChecklistItem.day.desc(), models.ChecklistItem.position, models.ChecklistItem.id)
+    ).all()
+    seen: set[str] = set()
+    out = []
+    for r in rows:
+        if r.label in today_labels or r.label in seen or r.label.startswith("Revisar cards vencidos"):
+            continue
+        seen.add(r.label)
+        out.append(r)
+    return out
+
+
+@router.get("/checklist/pending")
+def get_pending(day: date | None = Query(None), session: Session = Depends(get_session)):
+    return [_item_out(r) for r in _pending_from_past(session, day or date.today())]
+
+
+@router.post("/checklist/carry")
+def carry_pending(day: date | None = Query(None), session: Session = Depends(get_session)):
+    """Traz para o dia as não feitas de dias anteriores (cópia; o dia antigo fica como estava)."""
+    day = day or date.today()
+    pending = _pending_from_past(session, day)
+    position = max(session.scalars(select(models.ChecklistItem.position)
+                                   .where(models.ChecklistItem.day == day)).all(), default=0)
+    for r in pending:
+        position += 1
+        session.add(models.ChecklistItem(day=day, label=r.label, planned_minutes=r.planned_minutes,
+                                         topic_id=r.topic_id, position=position))
+    session.commit()
+    return {"added": len(pending), "items": get_checklist(day, session)}
+
+
 @router.post("/checklist/plan")
 def plan_day(day: date | None = Query(None), session: Session = Depends(get_session)):
     """Monta o dia: retestes vencidos + a próxima ação sugerida. Não duplica o que já está na lista."""
@@ -326,7 +389,9 @@ def plan_day(day: date | None = Query(None), session: Session = Depends(get_sess
     position = max((i.position for i in existing), default=0)
     added = 0
 
-    for r in due_reviews(session, day):
+    # D40: os cursos só entram no plano do dia com a chave ligada em Configurações
+    with_courses = bool(settings_store.get(session, "courses_in_day_plan"))
+    for r in due_reviews(session, day, area=None if with_courses else "faculdade"):
         if r.id in have_reviews:
             continue
         info = _review_out(session, r)
@@ -357,5 +422,27 @@ def plan_day(day: date | None = Query(None), session: Session = Depends(get_sess
                                              planned_minutes=goal if is_topic else None,
                                              topic_id=action["topic_id"] if is_topic else None))
             added += 1
+    if with_courses:
+        added, position = _plan_courses(session, day, have_labels, position, added)
     session.commit()
     return {"added": added, "items": get_checklist(day, session)}
+
+
+def _plan_courses(session: Session, day: date, have_labels: set[str], position: int, added: int) -> tuple[int, int]:
+    """D40 ligado: a próxima aula de cada curso em andamento vira uma tarefa do dia."""
+    from .courses import _courses, _modules, next_lesson  # import local: courses depende deste módulo
+
+    for c in _courses(session):
+        if (c.course_status or "doing") != "doing":
+            continue
+        nxt = next_lesson(_modules(session, c.id))
+        if not nxt:
+            continue
+        label = (f"Próxima aula: {nxt['title']} · {c.name}" if nxt["title"]
+                 else f"Continuar o {nxt['module']} · {c.name}")
+        if label in have_labels:
+            continue
+        position += 1
+        session.add(models.ChecklistItem(day=day, label=label, position=position, topic_id=nxt["topic_id"]))
+        added += 1
+    return added, position
