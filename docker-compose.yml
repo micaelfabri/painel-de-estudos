@@ -9,6 +9,16 @@ services:
       - ./data:/app/data
       # F5: google_client.json e google_token.json (fora do git e da imagem)
       - ./secrets:/app/secrets
+      # v1.3 (SPEC D18): pasta de materiais do curso, SÓ LEITURA. Caminho no .env (PAINEL_MATERIALS_HOST)
+      - type: bind
+        source: ${PAINEL_MATERIALS_HOST:-./materiais}
+        target: /app/materiais
+        read_only: true
+        bind:
+          create_host_path: true
+    # v1.7: hora de Brasília no contêiner ("hoje" não vira às 21:00); dá para trocar no .env
+    environment:
+      TZ: ${TZ:-America/Sao_Paulo}
     env_file:
       - path: .env
         required: false

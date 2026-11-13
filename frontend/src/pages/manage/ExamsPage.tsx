@@ -12,7 +12,7 @@ import { api, type Deadline, type Exam, type Subject } from "@/lib/api";
 import { formatDayMonth, formatTime, parseLocalDate, parseLocalDateTime } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
 
-type Editing = { type: "exam"; item: Exam | null } | { type: "deadline"; item: Deadline | null } | null;
+export type Editing = { type: "exam"; item: Exam | null } | { type: "deadline"; item: Deadline | null } | null;
 
 function examWhen(e: Exam) {
   if (e.scheduled_at) {
@@ -21,6 +21,14 @@ function examWhen(e: Exam) {
   }
   return e.schedule_by ? `Agendar até ${formatDayMonth(parseLocalDate(e.schedule_by))}` : "—";
 }
+
+const KIND_LABEL: Record<string, string> = {
+  deadline: "Prazo",
+  event: "Evento",
+  lab: "Laboratório",
+  activity: "Atividade",
+  mock: "Simulado",
+};
 
 /** Gerenciar › Provas e prazos */
 export function ExamsPage() {
@@ -84,9 +92,21 @@ export function ExamsPage() {
           title={(d) => d.title}
           empty="Nenhum prazo ou evento cadastrado."
           columns={[
-            { header: "Tipo", cell: (d) => (d.kind === "event" ? "Evento" : "Prazo"), inCard: true },
-            { header: "Data", cell: (d) => formatDayMonth(parseLocalDate(d.due_date)), inCard: true },
-            { header: "Disciplina", cell: (d) => subjectName(d.subject_id), inCard: true },
+            {
+              header: "Tipo",
+              cell: (d) => KIND_LABEL[d.kind] ?? d.kind,
+              inCard: true,
+            },
+            {
+              header: "Data",
+              cell: (d) => formatDayMonth(parseLocalDate(d.due_date)),
+              inCard: true,
+            },
+            {
+              header: "Disciplina",
+              cell: (d) => subjectName(d.subject_id),
+              inCard: true,
+            },
           ]}
           actions={(d) => (
             <Button variant="ghost" size="sm" onClick={() => setEditing({ type: "deadline", item: d })}>
@@ -110,7 +130,7 @@ export function ExamsPage() {
   );
 }
 
-function EditDialog({
+export function EditDialog({
   editing,
   subjects,
   onClose,
@@ -187,7 +207,10 @@ function EditDialog({
     }
   };
 
-  const subjectOptions = subjects.map((s) => ({ value: String(s.id), label: s.name }));
+  const subjectOptions = subjects.map((s) => ({
+    value: String(s.id),
+    label: s.name,
+  }));
   const isExam = editing?.type === "exam";
 
   return (
@@ -199,8 +222,8 @@ function EditDialog({
               ? "Editar prova"
               : "Nova prova"
             : editing?.item
-              ? "Editar prazo ou evento"
-              : "Novo prazo ou evento"
+              ? "Editar prazo, evento ou atividade"
+              : "Novo prazo, evento ou atividade"
         }
       >
         <form onSubmit={save} className="grid grid-cols-1 gap-4" noValidate>
@@ -221,10 +244,14 @@ function EditDialog({
                 {() => <Input id="e-kind" value={v.kind ?? ""} onChange={(e) => set("kind")(e.target.value)} />}
               </Field>
               <Field id="e-date" label="Data" optional>
-                {() => <Input id="e-date" type="date" value={v.date ?? ""} onChange={(e) => set("date")(e.target.value)} />}
+                {() => (
+                  <Input id="e-date" type="date" value={v.date ?? ""} onChange={(e) => set("date")(e.target.value)} />
+                )}
               </Field>
               <Field id="e-time" label="Hora" optional>
-                {() => <Input id="e-time" type="time" value={v.time ?? ""} onChange={(e) => set("time")(e.target.value)} />}
+                {() => (
+                  <Input id="e-time" type="time" value={v.time ?? ""} onChange={(e) => set("time")(e.target.value)} />
+                )}
               </Field>
               <Field id="e-by" label="Agendar até" optional hint="Use quando a prova ainda não tem data marcada.">
                 {(d) => (
@@ -247,7 +274,9 @@ function EditDialog({
                 {() => <Input id="d-title" value={v.title ?? ""} onChange={(e) => set("title")(e.target.value)} />}
               </Field>
               <Field id="d-date" label="Data">
-                {() => <Input id="d-date" type="date" value={v.date ?? ""} onChange={(e) => set("date")(e.target.value)} />}
+                {() => (
+                  <Input id="d-date" type="date" value={v.date ?? ""} onChange={(e) => set("date")(e.target.value)} />
+                )}
               </Field>
               <Field id="d-kind" label="Tipo">
                 {() => (
@@ -258,6 +287,9 @@ function EditDialog({
                     options={[
                       { value: "deadline", label: "Prazo" },
                       { value: "event", label: "Evento" },
+                      { value: "lab", label: "Laboratório" },
+                      { value: "activity", label: "Atividade" },
+                      { value: "mock", label: "Simulado" },
                     ]}
                   />
                 )}

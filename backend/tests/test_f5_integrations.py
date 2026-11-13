@@ -290,3 +290,16 @@ def test_missing_client_file_is_clear(google):
     (secrets / "google_client.json").unlink()
     r = client.get("/api/google/login", follow_redirects=False)
     assert r.status_code == 409 and "google_client.json" in r.json()["detail"]
+
+
+def test_sync_only_the_exams_confirmed(google):
+    """v1.5: a tela lista as provas e manda só as marcadas (eu já crio as minhas na agenda)."""
+    client, fake, _ = google
+    _login(client)
+    preview = client.get("/api/google/sync-exams/preview").json()
+    assert preview and all(not p["sent"] for p in preview)
+    assert client.post("/api/google/sync-exams", json={"exam_ids": []}).json() == {"created": 0, "updated": 0}
+    assert fake.events == {}
+    out = client.post("/api/google/sync-exams", json={"exam_ids": [preview[0]["id"]]}).json()
+    assert out == {"created": 1, "updated": 0} and len(fake.events) == 1
+    assert client.get("/api/google/sync-exams/preview").json()[0]["sent"] is True

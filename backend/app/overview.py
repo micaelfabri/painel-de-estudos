@@ -1,13 +1,16 @@
 """Visão do painel (modo Estudo): tudo o que a tela inicial precisa numa chamada."""
 
+import logging
 from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from . import learning, models, settings_store
+from . import cards, grading, learning, models, settings_store, study
 from .db import get_session
+
+log = logging.getLogger("painel.overview")
 
 router = APIRouter(prefix="/api", tags=["painel"])
 
@@ -38,11 +41,30 @@ def _exam_info(subject: models.Subject, today: date):
     }
 
 
-def _subject_payload(subject: models.Subject, today: date) -> dict:
+def _grade(subject: models.Subject, deadlines: list[models.Deadline]) -> dict | None:
+    """Nota prevista (v1.5, D30) pela regra da disciplina; sem regra, nada."""
+    if not subject.grading_rule:
+        return None
+    try:
+        rule = grading.GradingRule.model_validate(subject.grading_rule)
+    except ValueError:
+        return None
+    exams = [e.score for e in subject.exams if e.score is not None]
+    mocks = [d.score for d in deadlines if d.kind == "mock"]
+    return grading.predict(rule, exams, mocks)
+
+
+def _subject_payload(subject: models.Subject, today: date, deadlines: list[models.Deadline] | None = None) -> dict:
     pp = subject.portal_progress
-    lab_pending = bool(
-        subject.exam_requires_lab and pp and pp.lab_total and (pp.lab_done or 0) < pp.lab_total
-    )
+    deadlines = deadlines or []
+    labs = [d for d in deadlines if d.kind == "lab"]
+    if labs:
+        # v1.5: com laboratório cadastrado em Provas e prazos, vale o "feito" dele
+        lab_pending = bool(subject.exam_requires_lab and any(d.done_at is None for d in labs))
+    else:
+        lab_pending = bool(
+            subject.exam_requires_lab and pp and pp.lab_total and (pp.lab_done or 0) < pp.lab_total
+        )
     return {
         "id": subject.id,
         "name": subject.name,
@@ -59,6 +81,7 @@ def _subject_payload(subject: models.Subject, today: date) -> dict:
         "exam_requires_lab": subject.exam_requires_lab,
         "lab_pending": lab_pending,
         "pending_topics": [{"id": t.id, "title": t.title} for t in subject.topics if not t.portal_done],
+        "grade": _grade(subject, deadlines),
     }
 
 
@@ -142,7 +165,8 @@ def timeline(session: Session, subjects: list[models.Subject], today: date, days
         for exam in subject.exams:
             if exam.scheduled_at and today <= exam.scheduled_at.date() < end:
                 buckets[exam.scheduled_at.date()].append(
-                    {"category": "exam", "title": f"Prova de {subject.name}", "time": exam.scheduled_at.strftime("%H:%M")}
+                    {"category": "exam", "title": f"Prova de {subject.name}", "time": exam.scheduled_at.strftime("%H:%M"),
+                     "done": exam.done_at is not None, "label": exam.kind}
                 )
             elif exam.scheduled_at is None and exam.schedule_by and today <= exam.schedule_by < end:
                 buckets[exam.schedule_by].append(
@@ -154,7 +178,8 @@ def timeline(session: Session, subjects: list[models.Subject], today: date, days
     ).all()
     for d in deadlines:
         buckets[d.due_date].append(
-            {"category": "event" if d.kind == "event" else "deadline", "title": d.title, "time": None}
+            {"category": "event" if d.kind == "event" else "deadline", "title": d.title, "time": None,
+             "done": d.done_at is not None, "label": study.KIND_LABELS.get(d.kind, d.kind)}
         )
 
     return [{"date": d.isoformat(), "items": items} for d, items in buckets.items()]
@@ -163,6 +188,11 @@ def timeline(session: Session, subjects: list[models.Subject], today: date, days
 @router.get("/overview")
 def overview(today: date | None = Query(None, description="Só para testes; padrão = hoje"),
              session: Session = Depends(get_session)):
+    # D20: o painel abre por aqui, então é o momento do backup do dia (barato quando já existe)
+    try:
+        study.daily_backup()
+    except OSError as exc:
+        log.warning("Backup do dia não foi feito: %s", exc)
     return compute_overview(session, today or date.today())
 
 
@@ -186,7 +216,11 @@ def compute_overview(session: Session, today: date) -> dict:
             ).all()
         )
 
-    payload = [_subject_payload(s, today) for s in subjects]
+    deadlines: dict[int, list[models.Deadline]] = {}
+    for d in session.scalars(select(models.Deadline).where(
+            models.Deadline.subject_id.in_([s.id for s in subjects]))).all():
+        deadlines.setdefault(d.subject_id, []).append(d)
+    payload = [_subject_payload(s, today, deadlines.get(s.id)) for s in subjects]
     study = next_action(payload)
     exams = sorted(
         ({"subject_id": s["id"], "subject_name": s["name"], **s["exam"]} for s in payload if s["exam"]),
@@ -200,6 +234,8 @@ def compute_overview(session: Session, today: date) -> dict:
         "upcoming_exams": exams,
         "next_action": _with_reviews(session, today, study),
         "next_study_action": study,
+        # v1.6 (D35): cards vencidos hoje aparecem junto da próxima ação
+        "cards_due": cards.due_count(session, today),
         "week": week_hours(session, today),
         "timeline": timeline(session, subjects, today),
         "timer": {

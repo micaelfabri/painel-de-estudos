@@ -1,10 +1,13 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Award,
+  BarChart3,
   BookOpen,
   CalendarClock,
   GraduationCap,
   HelpCircle,
+  History,
+  Layers,
   LayoutDashboard,
   Menu,
   Moon,
@@ -19,12 +22,23 @@ import { NavLink, useLocation } from "react-router-dom";
 import { Button, focusRing } from "@/components/ui/button";
 import { SheetContent } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { AppFooter } from "./AppFooter";
 import { ModeSwitch, modeFromPath } from "./ModeSwitch";
 
 const NAV = {
-  study: [{ to: "/estudo", label: "Painel", icon: LayoutDashboard }],
+  study: [
+    { to: "/estudo", label: "Painel", icon: LayoutDashboard, end: true },
+    { to: "/estudo/provas", label: "Provas e prazos", icon: CalendarClock },
+    { to: "/estudo/historico", label: "Histórico", icon: History },
+    { to: "/estudo/cards", label: "Cards", icon: Layers },
+    { to: "/estudo/desempenho", label: "Desempenho", icon: BarChart3 },
+  ],
   manage: [
-    { to: "/gerenciar/disciplinas", label: "Disciplinas e temas", icon: BookOpen },
+    {
+      to: "/gerenciar/disciplinas",
+      label: "Disciplinas e temas",
+      icon: BookOpen,
+    },
     { to: "/gerenciar/provas", label: "Provas e prazos", icon: CalendarClock },
     { to: "/gerenciar/curso", label: "Semestres e curso", icon: GraduationCap },
     { to: "/gerenciar/acc", label: "Atividades complementares", icon: Award },
@@ -37,10 +51,11 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate
   const mode = modeFromPath(useLocation().pathname);
   return (
     <nav role="navigation" aria-label="Seções" className="flex flex-col gap-1 p-2">
-      {NAV[mode].map(({ to, label, icon: Icon }) => (
+      {NAV[mode].map(({ to, label, icon: Icon, ...rest }) => (
         <NavLink
           key={to}
           to={to}
+          end={"end" in rest ? rest.end : false}
           onClick={onNavigate}
           title={collapsed ? label : undefined}
           className={({ isActive }) =>
@@ -95,7 +110,10 @@ export function AppShell({ children, rightPanel, rightPanelTrigger }: AppShellPr
         Pular para o conteúdo
       </a>
 
-      <header role="banner" className="sticky top-0 z-40 flex h-16 items-center gap-2 border-b border-border bg-card px-4">
+      <header
+        role="banner"
+        className="sticky top-0 z-40 flex h-16 items-center gap-2 border-b border-border bg-card px-4"
+      >
         <DialogPrimitive.Root open={mobileOpen} onOpenChange={setMobileOpen}>
           <DialogPrimitive.Trigger asChild>
             <Button variant="ghost" size="icon" aria-label="Abrir menu" className="md:hidden">
@@ -103,7 +121,9 @@ export function AppShell({ children, rightPanel, rightPanelTrigger }: AppShellPr
             </Button>
           </DialogPrimitive.Trigger>
           <SheetContent side="left" title="Menu">
-            <div className="flex h-16 items-center border-b border-border px-4 text-base font-semibold">Painel de Estudos</div>
+            <div className="flex h-16 items-center border-b border-border px-4 text-base font-semibold">
+              Painel de Estudos
+            </div>
             <div className="p-2 sm:hidden">
               <ModeSwitch stacked onNavigate={() => setMobileOpen(false)} />
             </div>
@@ -152,9 +172,7 @@ export function AppShell({ children, rightPanel, rightPanelTrigger }: AppShellPr
           >
             {children}
           </main>
-          <footer role="contentinfo" className="mt-auto flex h-12 items-center border-t border-border px-6">
-            <p className="text-xs text-muted-foreground">Roda só neste PC · dados em ./data</p>
-          </footer>
+          <AppFooter />
         </div>
 
         {rightPanel}

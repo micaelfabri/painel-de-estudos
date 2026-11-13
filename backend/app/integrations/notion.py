@@ -125,6 +125,27 @@ class NotionClient:
             if b.get("has_children") and depth < MAX_DEPTH and kind not in ("child_page", "child_database"):
                 self._collect(b["id"], lines, depth + 1)
 
+    def page_images(self, page_id: str) -> list[dict]:
+        """Imagens da página em ordem, com o título (# ou ##) sob o qual cada uma está (D17)."""
+        out: list[dict] = []
+        self._collect_images(page_id, out, ["Início"], 0)
+        return out
+
+    def _collect_images(self, block_id: str, out: list[dict], heading: list[str], depth: int) -> None:
+        for b in self.children(block_id):
+            kind = b.get("type")
+            if kind in ("heading_1", "heading_2"):
+                text = "".join(t.get("plain_text", "") for t in b[kind].get("rich_text", [])).strip()
+                heading[0] = text[:120] or heading[0]
+            elif kind == "image":
+                img = b["image"]
+                url = (img.get(img.get("type", ""), {}) or {}).get("url")
+                caption = "".join(t.get("plain_text", "") for t in img.get("caption", []))
+                if url:
+                    out.append({"block_id": b["id"], "url": url, "section": heading[0], "caption": caption[:200]})
+            if b.get("has_children") and depth < MAX_DEPTH and kind not in ("child_page", "child_database"):
+                self._collect_images(b["id"], out, heading, depth + 1)
+
     def append(self, page_id: str, blocks: list[dict]) -> None:
         # PATCH em children = acrescentar no fim; nunca usa DELETE
         self._req("PATCH", f"/blocks/{page_id}/children", json={"children": blocks})
@@ -183,10 +204,10 @@ def result_blocks(session: Session, qs: models.QuestionSet) -> list[dict]:
 
 def sync_set(session: Session, qs: models.QuestionSet, transport: httpx.BaseTransport | None = None) -> str:
     """Grava o resultado de um conjunto concluído. Devolve ok | skipped | erro (texto curto)."""
-    topic = session.get(models.Topic, qs.topic_id)
+    topic = session.get(models.Topic, qs.topic_id) if qs.topic_id else None
     if qs.completed_at is None or qs.notion_synced_at is not None:
         return "skipped"
-    if not topic.notion_page_id or not token():
+    if topic is None or not topic.notion_page_id or not token():
         return "skipped"
     try:
         NotionClient(transport).append(topic.notion_page_id, result_blocks(session, qs))

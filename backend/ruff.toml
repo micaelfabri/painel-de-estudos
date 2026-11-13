@@ -1,0 +1,15 @@
+# Linter do backend (CI). Linhas de até 120, como no resto do código.
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+  "E501",  # linhas longas: o código antigo tem ~30 strings acima de 120; não reformatar arquivos inteiros
+  "E731",  # lambda atribuída a nome (usada em formatações curtas)
+  "B008",  # Depends()/Query() no padrão do FastAPI
+]
+
+[lint.per-file-ignores]
+"migrations/*" = ["E402", "I001", "UP", "W291"]
+"tests/*" = ["B017"]

@@ -19,13 +19,14 @@ import logging
 import os
 import secrets as pysecrets
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -214,12 +215,17 @@ class CalendarClient:
         return out
 
 
-def sync_exams(session: Session, transport: httpx.BaseTransport | None = None) -> dict:
+def sync_exams(session: Session, transport: httpx.BaseTransport | None = None,
+               exam_ids: list[int] | None = None) -> dict:
+    """Manda as provas escolhidas para a agenda do painel (v1.5: só as marcadas na confirmação)."""
+    stmt = select(models.Exam).where(models.Exam.scheduled_at.is_not(None)).options(selectinload(models.Exam.subject))
+    if exam_ids is not None:
+        if not exam_ids:
+            return {"created": 0, "updated": 0}
+        stmt = stmt.where(models.Exam.id.in_(exam_ids))
+    exams = session.scalars(stmt).all()
     client = CalendarClient(transport)
     cal_id = client.ensure_calendar(session)
-    exams = session.scalars(
-        select(models.Exam).where(models.Exam.scheduled_at.is_not(None)).options(selectinload(models.Exam.subject))
-    ).all()
     counts = {"created": 0, "updated": 0}
     for exam in exams:
         event_id, what = client.upsert_exam(cal_id, exam)
@@ -266,10 +272,23 @@ def callback(request: Request, code: str | None = None, state: str = "", error: 
     return RedirectResponse("/gerenciar/configuracoes?google=ok", status_code=302)
 
 
+class SyncIn(BaseModel):
+    exam_ids: list[int] | None = None
+
+
+@router.get("/sync-exams/preview")
+def sync_preview(session: Session = Depends(get_session)):
+    """v1.5: o que iria para a agenda, para confirmar antes (eu já crio as provas na minha agenda)."""
+    exams = session.scalars(select(models.Exam).where(models.Exam.scheduled_at.is_not(None))
+                            .options(selectinload(models.Exam.subject)).order_by(models.Exam.scheduled_at)).all()
+    return [{"id": e.id, "title": f"{e.kind} · {e.subject.name}", "scheduled_at": e.scheduled_at.isoformat(),
+             "sent": e.gcal_event_id is not None} for e in exams]
+
+
 @router.post("/sync-exams")
-def sync(request: Request, session: Session = Depends(get_session)):
+def sync(request: Request, data: SyncIn | None = None, session: Session = Depends(get_session)):
     try:
-        return sync_exams(session, transport_of(request))
+        return sync_exams(session, transport_of(request), data.exam_ids if data else None)
     except GoogleError as exc:
         raise HTTPException(409, str(exc)) from exc
 

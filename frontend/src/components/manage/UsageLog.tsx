@@ -1,4 +1,7 @@
+import * as React from "react";
+
 import { RecordList } from "@/components/manage/RecordList";
+import { Pagination } from "@/components/ui/pagination";
 import { formatNumber } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
 
@@ -15,11 +18,25 @@ interface LlmCallRow {
   error: string | null;
 }
 
-const STATUS: Record<string, string> = { ok: "ok", invalid_json: "JSON inválido", error: "erro", cancelled: "cancelada" };
+const STATUS: Record<string, string> = {
+  ok: "ok",
+  invalid_json: "JSON inválido",
+  error: "erro",
+  cancelled: "cancelada",
+};
 
-/** Registro de uso do modelo (SPEC §7): modelo, prompt, tokens, tempo, status */
+interface UsagePage {
+  page: number;
+  pages: number;
+  per_page: number;
+  total: number;
+  items: LlmCallRow[];
+}
+
+/** Registro de uso do modelo (SPEC §7): modelo, prompt, tokens, tempo, status; 10 por página (v1.7) */
 export function UsageLog() {
-  const calls = useApi<LlmCallRow[]>("/agent/usage");
+  const [page, setPage] = React.useState(1);
+  const calls = useApi<UsagePage>(`/agent/usage?page=${page}&per_page=10`);
   return (
     <section aria-labelledby="h-uso" className="space-y-3">
       <h2 id="h-uso" className="text-lg font-semibold">
@@ -27,7 +44,7 @@ export function UsageLog() {
       </h2>
       <RecordList
         caption="Chamadas ao modelo local"
-        rows={calls.data ?? []}
+        rows={calls.data?.items ?? []}
         rowKey={(c) => c.id}
         title={(c) => `${c.created_at?.replace("T", " ").slice(0, 16) ?? "—"} · ${c.model}`}
         empty="Nenhuma chamada ao modelo ainda."
@@ -43,12 +60,22 @@ export function UsageLog() {
           { header: "Tentativas", cell: (c) => c.attempts, numeric: true },
           {
             header: "Status",
-            cell: (c) => (c.error ? `${STATUS[c.status] ?? c.status}: ${c.error.slice(0, 80)}` : (STATUS[c.status] ?? c.status)),
+            cell: (c) =>
+              c.error ? `${STATUS[c.status] ?? c.status}: ${c.error.slice(0, 80)}` : (STATUS[c.status] ?? c.status),
             inCard: true,
           },
         ]}
         actions={() => null}
       />
+      {calls.data && (
+        <Pagination
+          page={calls.data.page}
+          pages={calls.data.pages}
+          total={calls.data.total}
+          onPage={setPage}
+          label="Páginas do registro de uso"
+        />
+      )}
     </section>
   );
 }

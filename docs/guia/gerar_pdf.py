@@ -27,6 +27,10 @@ SHOTS = {
         ("05-provas.png", "Gerenciar → Provas e prazos."),
         ("06-curso.png", "Gerenciar → Semestres e curso."),
         ("07-acc.png", "Gerenciar → Atividades complementares."),
+        ("09-provas-estudo.png", "Estudo → Provas e prazos: marcar como feito (com confirmação) e lançar o resultado."),
+        ("10-historico.png", "Estudo → Histórico: evolução por tema, erros por status e refazer."),
+        ("11-desempenho.png", "Estudo → Desempenho: passe o mouse num ponto para ler; clique para abrir o teste."),
+        ("12-cards.png", "Estudo → Cards: gerar dos pontos fracos, de prints ou de vídeo; revisar por tema."),
     ],
     "3. LM Studio, uma vez só": [
         ("08-configuracoes.png", "Gerenciar → Configurações: endereço do modelo e modelo padrão."),

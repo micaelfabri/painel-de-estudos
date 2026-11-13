@@ -128,7 +128,7 @@ def test_full_cycle_generate_answer_score(fake):
     assert client.get(f"/api/topics/{topic_id}").json()["source_text"] == TOPIC_TEXT
 
     # Registro de uso
-    usage = client.get("/api/agent/usage").json()
+    usage = client.get("/api/agent/usage").json()["items"]
     assert usage[0]["status"] == "ok" and usage[0]["input_tokens"] == 100
 
 
@@ -137,7 +137,7 @@ def test_invalid_json_retries_once_then_ok(fake):
     model.bad_replies = 1
     r = client.post("/api/agent/question-sets", json={"topic_id": _topic_id(client), "text": TOPIC_TEXT, "n_options": 4})
     assert r.status_code == 201
-    assert client.get("/api/agent/usage").json()[0]["attempts"] == 2
+    assert client.get("/api/agent/usage").json()["items"][0]["attempts"] == 2
 
 
 def test_invalid_json_twice_saves_nothing(fake):
@@ -146,7 +146,7 @@ def test_invalid_json_twice_saves_nothing(fake):
     r = client.post("/api/agent/question-sets", json={"topic_id": _topic_id(client), "text": TOPIC_TEXT, "n_options": 4})
     assert r.status_code == 502 and r.json()["detail"]["status"] == "invalid_json"
     assert client.get("/api/agent/question-sets").json() == []
-    assert client.get("/api/agent/usage").json()[0]["status"] == "invalid_json"
+    assert client.get("/api/agent/usage").json()["items"][0]["status"] == "invalid_json"
 
 
 def test_requires_text_and_model(seeded):
@@ -230,7 +230,7 @@ def test_cut_off_reply_is_not_retried(seeded, message):
         assert r.status_code == 502
         assert r.json()["detail"]["status"] == "cut_off" and "Context Length" in r.json()["detail"]["message"]
         assert len(calls) == 1
-        log = seeded.get("/api/agent/usage").json()
+        log = seeded.get("/api/agent/usage").json()["items"]
         entry = log[0] if isinstance(log, list) else log["calls"][0]
         assert "cortada" in (entry.get("error") or "")
     finally:

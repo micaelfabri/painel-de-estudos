@@ -1,4 +1,4 @@
-import { ListPlus, Plus } from "lucide-react";
+import { Check, ListPlus, Pencil, Plus, Trash2, X } from "lucide-react";
 import * as React from "react";
 import { toast } from "sonner";
 
@@ -22,6 +22,8 @@ export function DailyChecklist() {
   const [reviews, setReviews] = React.useState<ReviewDue[]>([]);
   const [newLabel, setNewLabel] = React.useState("");
   const [announce, setAnnounce] = React.useState("");
+  const [editingId, setEditingId] = React.useState<number | null>(null);
+  const [draft, setDraft] = React.useState("");
   const day = todayIso();
 
   const load = React.useCallback(async () => {
@@ -48,6 +50,31 @@ export function DailyChecklist() {
     }
   };
 
+  // v1.3 (D19): corrigir o nome de uma tarefa (ex.: temas errados) ou tirar da lista
+  const rename = async (item: ChecklistItem) => {
+    const label = draft.trim();
+    setEditingId(null);
+    if (!label || label === item.label) return;
+    setItems((list) => list.map((i) => (i.id === item.id ? { ...i, label } : i)));
+    try {
+      await api.patch(`/learning/checklist/${item.id}`, { label });
+    } catch {
+      setItems((list) => list.map((i) => (i.id === item.id ? item : i)));
+      toast.error("Não foi possível renomear a tarefa.");
+    }
+  };
+
+  const remove = async (item: ChecklistItem) => {
+    setItems((list) => list.filter((i) => i.id !== item.id));
+    try {
+      await api.del(`/learning/checklist/${item.id}`);
+      setAnnounce("Tarefa removida");
+    } catch {
+      setItems((list) => [...list, item].sort((a, b) => a.position - b.position));
+      toast.error("Não foi possível remover a tarefa.");
+    }
+  };
+
   const plan = async () => {
     try {
       const res = await api.post<{ added: number; items: ChecklistItem[] }>(`/learning/checklist/plan?day=${day}`, {});
@@ -63,7 +90,11 @@ export function DailyChecklist() {
     const label = newLabel.trim();
     if (!label) return;
     try {
-      const item = await api.post<ChecklistItem>("/learning/checklist", { day, label, position: items.length + 1 });
+      const item = await api.post<ChecklistItem>("/learning/checklist", {
+        day,
+        label,
+        position: items.length + 1,
+      });
       setItems((list) => [...list, item]);
       setNewLabel("");
     } catch {
@@ -73,7 +104,13 @@ export function DailyChecklist() {
 
   const startRetest = (reviewId: number) => {
     const r = reviews.find((x) => x.id === reviewId);
-    if (r) setPreset({ subjectId: r.subject_id, topicId: r.topic_id, attemptType: r.attempt_type, label: r.label });
+    if (r)
+      setPreset({
+        subjectId: r.subject_id,
+        topicId: r.topic_id,
+        attemptType: r.attempt_type,
+        label: r.label,
+      });
   };
 
   return (
@@ -95,22 +132,82 @@ export function DailyChecklist() {
             const reviewOpen = item.review_id !== null && reviews.some((r) => r.id === item.review_id);
             return (
               <li key={item.id} className="py-1">
-                <CheckboxRow
-                  id={`chk-${item.id}`}
-                  checked={item.done}
-                  onCheckedChange={(v) => toggle(item, v)}
-                  trailing={
-                    item.planned_minutes ? (
-                      <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                        {formatDuration(item.planned_minutes * 60)}
-                      </span>
-                    ) : undefined
-                  }
-                >
-                  <span className={cn(item.done && "text-muted-foreground line-through")}>{item.label}</span>
-                </CheckboxRow>
+                {editingId === item.id ? (
+                  <form
+                    className="flex items-center gap-2 py-1"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void rename(item);
+                    }}
+                  >
+                    <label htmlFor={`chk-edit-${item.id}`} className="sr-only">
+                      Nome da tarefa
+                    </label>
+                    <Input
+                      id={`chk-edit-${item.id}`}
+                      value={draft}
+                      autoFocus
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === "Escape" && setEditingId(null)}
+                    />
+                    <Button type="submit" variant="ghost" size="icon" aria-label="Salvar nome">
+                      <Check aria-hidden="true" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Cancelar"
+                      onClick={() => setEditingId(null)}
+                    >
+                      <X aria-hidden="true" />
+                    </Button>
+                  </form>
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <CheckboxRow
+                      className="flex-1"
+                      id={`chk-${item.id}`}
+                      checked={item.done}
+                      onCheckedChange={(v) => toggle(item, v)}
+                      trailing={
+                        item.planned_minutes ? (
+                          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                            {formatDuration(item.planned_minutes * 60)}
+                          </span>
+                        ) : undefined
+                      }
+                    >
+                      <span className={cn(item.done && "text-muted-foreground line-through")}>{item.label}</span>
+                    </CheckboxRow>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Editar a tarefa ${item.label}`}
+                      onClick={() => {
+                        setDraft(item.label);
+                        setEditingId(item.id);
+                      }}
+                    >
+                      <Pencil aria-hidden="true" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Remover a tarefa ${item.label}`}
+                      onClick={() => remove(item)}
+                    >
+                      <Trash2 aria-hidden="true" />
+                    </Button>
+                  </div>
+                )}
                 {reviewOpen && !item.done && (
-                  <Button variant="outline" size="sm" className="mb-2 ml-7" onClick={() => startRetest(item.review_id!)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mb-2 ml-7"
+                    onClick={() => startRetest(item.review_id!)}
+                  >
                     Fazer reteste
                   </Button>
                 )}

@@ -1,7 +1,8 @@
-import { ArrowDown, Loader2, Send } from "lucide-react";
+import { ArrowDown, Loader2, Send, Trash2 } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { fieldClass } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useAgent } from "./AgentContext";
@@ -19,7 +20,7 @@ function PendingRow() {
   const seconds = Math.floor((now - pending.startedAt) / 1000);
   return (
     <div className="flex max-w-[85%] flex-col gap-1">
-      <span className="text-xs text-muted-foreground">Agente</span>
+      <span className="text-xs text-muted-foreground">Burro bot</span>
       <span className="flex items-center gap-2 text-sm">
         <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />
         {pending.label}
@@ -34,8 +35,37 @@ function PendingRow() {
   );
 }
 
+/** v1.5: limpar a conversa salva, com confirmação */
+function ClearChat() {
+  const { clearChat, pending } = useAgent();
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <Button variant="ghost" size="sm" className="self-end" disabled={pending !== null} onClick={() => setOpen(true)}>
+        <Trash2 aria-hidden="true" />
+        Limpar conversa
+      </Button>
+      <ConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        title="Limpar a conversa?"
+        note="Apaga só as mensagens da conversa com o agente. Testes, notas e erros continuam salvos."
+        confirmLabel="Limpar conversa"
+        destructive
+        onConfirm={clearChat}
+      />
+    </>
+  );
+}
+
 /** Lista de mensagens: role="log", rolagem automática só se o usuário já estava no fim */
-export function MessageList({ children, scrollRef }: { children?: React.ReactNode; scrollRef: React.RefObject<HTMLDivElement> }) {
+export function MessageList({
+  children,
+  scrollRef,
+}: {
+  children?: React.ReactNode;
+  scrollRef: React.RefObject<HTMLDivElement>;
+}) {
   const { entries, pending } = useAgent();
   const atBottom = React.useRef(true);
   const [showNew, setShowNew] = React.useState(false);
@@ -63,7 +93,14 @@ export function MessageList({ children, scrollRef }: { children?: React.ReactNod
 
   return (
     <>
-      <div role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversa" className="flex flex-col gap-4">
+      {entries.length > 0 && <ClearChat />}
+      <div
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label="Conversa"
+        className="flex flex-col gap-4"
+      >
         {entries.map((e) =>
           e.role === "user" ? (
             <div
@@ -74,9 +111,12 @@ export function MessageList({ children, scrollRef }: { children?: React.ReactNod
             </div>
           ) : (
             <div key={e.id} className="flex max-w-[85%] flex-col gap-1">
-              <span className="text-xs text-muted-foreground">Agente</span>
+              <span className="text-xs text-muted-foreground">Burro bot</span>
               <span
-                className={cn("whitespace-pre-wrap text-sm", e.kind === "error" ? "text-destructive-text" : "text-foreground")}
+                className={cn(
+                  "whitespace-pre-wrap text-sm",
+                  e.kind === "error" ? "text-destructive-text" : "text-foreground",
+                )}
               >
                 {e.text}
               </span>

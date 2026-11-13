@@ -27,7 +27,7 @@
 
 /* Exceção autorizada em 10/11/2026 — candidata à variante 'escuro neutro' da superfície Aplicação; pendente na governança do DS.
    Exceção autorizada pelo dono do painel (registrada no pedido 02 ao DS):
-   modo escuro preto e cinza neutro, sem o azul-ardósia do DS, igual ao site de PDI.
+   modo escuro preto e cinza neutro, sem o azul-ardósia do DS, como nos outros projetos do dono.
    A família primary (roxo) acima continua; cores de status continuam do DS. */
 .dark {
   --background: #0a0a0a;
@@ -39,4 +39,20 @@
   --border: #2e2e2e;
   --input: #737373;
   --input-background: #141414;
+}
+
+/* Tokens locais do rodapé — fora do DS; pendente na governança (resposta 03 do DS).
+   Cores oficiais das marcas (GitHub, LinkedIn); usadas só nos links do rodapé. */
+:root {
+  --brand-github: #24292f;
+  --brand-github-foreground: #ffffff;
+  --brand-linkedin: #0a66c2;
+  --brand-linkedin-foreground: #ffffff;
+}
+
+.dark {
+  --brand-github: #f0f6fc;
+  --brand-github-foreground: #0a0a0a;
+  --brand-linkedin: #0a66c2;
+  --brand-linkedin-foreground: #ffffff;
 }

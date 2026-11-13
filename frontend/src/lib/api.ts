@@ -1,6 +1,6 @@
 // Cliente da API local (/api). Erros viram ApiError com a mensagem do backend.
 
-export class ApiError extends Error {
+class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
@@ -56,12 +56,39 @@ export interface SubjectOverview {
   name: string;
   hours: number | null;
   percent: number | null;
-  counters: { contents: Counter; exercises: Counter; mocks: Counter; lab: Counter };
+  counters: {
+    contents: Counter;
+    exercises: Counter;
+    mocks: Counter;
+    lab: Counter;
+  };
   progress_as_of: string | null;
   exam: ExamInfo | null;
   exam_requires_lab: boolean;
   lab_pending: boolean;
   pending_topics: { id: number; title: string }[];
+  grade: GradePrediction | null;
+}
+
+/** v1.5 (D30): nota prevista pela regra da disciplina */
+export interface GradePrediction {
+  label: string;
+  to_check: boolean;
+  pass_min: number;
+  max_total: number;
+  parts: {
+    key: string;
+    label: string;
+    max: number;
+    value: number | null;
+    source: string | null;
+    source_label: string;
+    pending: number;
+  }[];
+  total: number | null;
+  passed: boolean | null;
+  known_total: number;
+  needed: { key: string; label: string; value: number | null; possible: boolean } | null;
 }
 
 export type NextActionAny = NextAction | ReviewAction;
@@ -95,6 +122,9 @@ export interface TimelineItem {
   category: "exam" | "deadline" | "event";
   title: string;
   time: string | null;
+  done?: boolean;
+  /** Tipo do item (Prova/AV, Prazo, Laboratório, Simulado...) */
+  label?: string;
 }
 
 export interface Overview {
@@ -103,9 +133,16 @@ export interface Overview {
   subjects: SubjectOverview[];
   upcoming_exams: (ExamInfo & { subject_id: number; subject_name: string })[];
   next_action: NextActionAny | null;
-  week: { start: string; days: { date: string; seconds: number }[]; total_seconds: number; goal_hours: number | null };
+  week: {
+    start: string;
+    days: { date: string; seconds: number }[];
+    total_seconds: number;
+    goal_hours: number | null;
+  };
   timeline: { date: string; items: TimelineItem[] }[];
   timer: { goal_minutes: number; alarm_minutes: number };
+  /** v1.6 (D35): cards vencidos hoje */
+  cards_due: number;
 }
 
 // --- Tipos dos cadastros -------------------------------------------------------
@@ -170,16 +207,24 @@ export interface Exam {
   score: number | null;
   gcal_event_id: string | null;
   notes: string | null;
+  done_at?: string | null;
 }
+
+export type DeadlineKind = "deadline" | "event" | "lab" | "activity" | "mock";
 
 export interface Deadline {
   id: number;
   subject_id: number | null;
   title: string;
   due_date: string;
-  kind: "deadline" | "event";
+  kind: DeadlineKind;
   gcal_event_id: string | null;
   notes: string | null;
+  done_at?: string | null;
+  total_questions?: number | null;
+  first_try_correct?: number | null;
+  wrong_attempts?: number | null;
+  score?: number | null;
 }
 
 export interface PortalProgress {
@@ -216,15 +261,24 @@ export interface QuestionView {
   statement: string;
   options: string[];
   flagged_bad: boolean;
-  answer: { chosen_index: number; is_correct: boolean; correct_index: number; explanation: string | null } | null;
+  answer: {
+    chosen_index: number;
+    is_correct: boolean;
+    correct_index: number;
+    explanation: string | null;
+  } | null;
 }
 
 export interface QuestionSetView {
   id: number;
-  topic_id: number;
+  topic_id: number | null;
   topic_title: string;
-  subject_id: number;
+  subject_id: number | null;
   attempt_type: string;
+  label?: string;
+  time_limit_minutes?: number | null;
+  seconds_left?: number | null;
+  created_at?: string | null;
   model: string;
   prompt_version: string;
   summary: string | null;
@@ -328,7 +382,14 @@ export interface MistakeReview {
   explanation: string | null;
   video_minute: string | null;
   reviewed: boolean;
+  status: MistakeStatus;
+  status_label: string;
+  subject_id: number;
 }
+
+/** v1.5 (D28): ciclo dos erros */
+export type MistakeStatus = "open" | "reviewed" | "again" | "fixed";
+export type MistakeCounts = Record<MistakeStatus, number>;
 
 // --- Curso e ACC (F6) ---------------------------------------------------------------
 
@@ -351,7 +412,13 @@ export interface AccSummary {
   planned_hours: number;
   missing_hours: number | null;
   rules_known: boolean;
-  categories: { category: string; registered: number; counted: number; planned: number; cap: number | null }[];
+  categories: {
+    category: string;
+    registered: number;
+    counted: number;
+    planned: number;
+    cap: number | null;
+  }[];
 }
 
 export interface CourseProgress {
@@ -373,9 +440,19 @@ export interface CourseProgress {
     id: number;
     code: string;
     is_current: boolean;
-    subjects: { id: number; name: string; hours: number | null; status: string }[];
+    subjects: {
+      id: number;
+      name: string;
+      hours: number | null;
+      status: string;
+    }[];
   }[];
-  unscheduled: { id: number; name: string; hours: number | null; status: string }[];
+  unscheduled: {
+    id: number;
+    name: string;
+    hours: number | null;
+    status: string;
+  }[];
 }
 
 export interface AccActivity {
@@ -418,4 +495,246 @@ export interface GoogleEvent {
   title: string;
   date: string;
   time: string | null;
+}
+
+// --- v1.3: lado Estudo (provas e prazos, histórico, semana, prints) ------------------
+
+export interface AgendaItem {
+  type: "exam" | "deadline";
+  id: number;
+  subject_id: number | null;
+  subject_name: string | null;
+  title: string;
+  kind: string;
+  kind_label: string;
+  date: string | null;
+  time: string | null;
+  to_schedule: boolean;
+  location: string | null;
+  score: number | null;
+  total_questions?: number | null;
+  first_try_correct?: number | null;
+  wrong_attempts?: number | null;
+  done: boolean;
+  notes: string | null;
+  notion_page_id?: string | null;
+  /** v1.5: nota máxima (simulado vale 1,0; prova segue a regra da disciplina) */
+  max_score: number;
+}
+
+export interface HistorySet {
+  id: number;
+  topic_id: number | null;
+  topic_title: string;
+  subject_id: number | null;
+  subject_name: string | null;
+  attempt_type: string;
+  label: string;
+  score: number | null;
+  questions: number;
+  answered: number;
+  right: number;
+  wrong: number;
+  created_at: string | null;
+  completed_at: string | null;
+  time_limit_minutes: number | null;
+  model: string;
+}
+
+export interface TopicEvolution {
+  topic_id: number;
+  topic_title: string;
+  subject_id: number;
+  subject_name: string;
+  status: "pending" | "learned" | "review";
+  open_mistakes: number;
+  mistakes: MistakeCounts;
+  cards: number;
+  has_text: boolean;
+  points: {
+    set_id: number;
+    date: string;
+    score: number | null;
+    label: string;
+  }[];
+}
+
+export interface WeekSummary {
+  start: string;
+  seconds: number;
+  sets: number;
+  average_score: number | null;
+  topics_learned: number;
+  items_done: number;
+}
+
+export interface PrintReadingView {
+  label: string;
+  question_number: number | null;
+  result: "correct" | "wrong" | "unknown";
+  note: string;
+}
+
+export interface PrintProposal {
+  images: number;
+  readings: PrintReadingView[];
+  total_questions: number;
+  first_try_correct: number;
+  wrong_attempts: number;
+  score: number | null;
+  unknown: number;
+}
+
+export interface FolderListing {
+  path: string;
+  entries: {
+    name: string;
+    path: string;
+    type: "dir" | "image" | "pdf" | "transcript";
+    size?: number;
+  }[];
+}
+
+// --- v1.4: cronômetro e desempenho ------------------------------------------------
+
+export interface TimerSessionView {
+  id: number;
+  subject_id: number | null;
+  subject_name: string | null;
+  started_at: string;
+  ended_at: string | null;
+  pauses: number;
+  active_seconds: number;
+  wall_seconds: number | null;
+  end_reason: "finished" | "reset" | null;
+  notes: string | null;
+}
+
+export interface Metrics {
+  start: string;
+  end: string;
+  days: number;
+  totals: {
+    seconds: number;
+    sets: number;
+    questions: number;
+    accuracy: number | null;
+    average_score: number | null;
+    study_days: number;
+    streak: number;
+    cards_reviewed: number;
+  };
+  daily: { date: string; seconds: number; sets: number; cards: number; average_score: number | null }[];
+  subject_id: number | null;
+  scores: {
+    set_id: number;
+    date: string;
+    score: number | null;
+    label: string;
+    attempt_type: string;
+    topic: string | null;
+    subject: string | null;
+  }[];
+  by_subject: {
+    subject_id: number;
+    name: string;
+    seconds: number;
+    sets: number;
+    average_score: number | null;
+    topics_total: number;
+    topics_learned: number;
+    topics_review: number;
+    open_mistakes: number;
+    mistakes: MistakeCounts;
+  }[];
+  topics: { pending: number; review: number; learned: number };
+  timer: {
+    sessions: number;
+    active_seconds: number;
+    wall_seconds: number;
+    average_active: number | null;
+    average_pauses: number | null;
+    focus: number | null;
+  };
+  graded: {
+    title: string;
+    kind: string;
+    score: number;
+    max_score: number;
+    wrong_attempts: number | null;
+    date: string | null;
+  }[];
+}
+
+/** v1.5: o que foi feito num dia (clique na barra do gráfico) */
+export interface DayDetail {
+  date: string;
+  seconds: number;
+  chunks: { started_at: string; ended_at: string | null; seconds: number; subject_name: string | null }[];
+  sets: HistorySet[];
+}
+
+export interface ChatMessageView {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string | null;
+}
+
+export interface ExamSyncPreview {
+  id: number;
+  title: string;
+  scheduled_at: string;
+  sent: boolean;
+}
+
+// --- Cards de estudo (v1.6, D32–D37) ---------------------------------------------
+
+export interface CardView {
+  id: number;
+  topic_id: number;
+  topic_title: string;
+  subject_id: number | null;
+  subject_name: string;
+  kind: "concept" | "question" | "confusion";
+  kind_label: string;
+  mode: "answer" | "flip";
+  front: string;
+  back: string;
+  explanation: string | null;
+  options: string[] | null;
+  correct_index: number | null;
+  source: "mistake" | "text" | "print" | "video";
+  source_label: string;
+  source_detail: string | null;
+  mistake_id: number | null;
+  mistake_status: MistakeStatus | null;
+  chosen_text: string | null;
+  video_minute: string | null;
+  notion_url: string | null;
+  step: number;
+  next_review: string;
+  due: boolean;
+}
+
+export interface CardReviewResult {
+  knew: boolean;
+  correct_index: number | null;
+  card: CardView;
+}
+
+export interface CardsSummary {
+  due: number;
+  total: number;
+  topics: {
+    topic_id: number;
+    topic_title: string;
+    subject_id: number;
+    subject_name: string;
+    total: number;
+    due: number;
+    reviews: number;
+    knew: number;
+    has_notion: boolean;
+  }[];
 }

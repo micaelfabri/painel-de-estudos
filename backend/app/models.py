@@ -7,15 +7,17 @@ só no PC do dono. Status e tipos são texto validado pelos schemas Pydantic.
 from datetime import date, datetime
 
 from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from .db import Base
 
 
+# v1.7: o CURRENT_TIMESTAMP do SQLite é sempre UTC. O Python grava a hora local (TZ do contêiner,
+# America/Sao_Paulo); o server_default fica só para linhas inseridas fora do ORM.
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, server_default=func.current_timestamp())
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+        DateTime, default=datetime.now, server_default=func.current_timestamp(), onupdate=datetime.now
     )
 
 
@@ -160,6 +162,8 @@ class Exam(TimestampMixin, Base):
     score: Mapped[float | None] = mapped_column(Float)
     gcal_event_id: Mapped[str | None] = mapped_column(String(200))
     notes: Mapped[str | None] = mapped_column(Text)
+    # v1.3 (D14): marcada como feita no lado Estudo
+    done_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     subject: Mapped[Subject] = relationship(back_populates="exams")
 
@@ -171,12 +175,40 @@ class Deadline(TimestampMixin, Base):
     subject_id: Mapped[int | None] = mapped_column(ForeignKey("subject.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(300))
     due_date: Mapped[date] = mapped_column(Date)
-    kind: Mapped[str] = mapped_column(String(20), default="deadline")  # deadline | event
+    kind: Mapped[str] = mapped_column(String(20), default="deadline")  # deadline | event | lab | activity | mock
     gcal_event_id: Mapped[str | None] = mapped_column(String(200))
     notes: Mapped[str | None] = mapped_column(Text)
+    # v1.3 (D14, D17): concluído e resultado de labs/atividades (nota 0..10 = acertos de primeira ÷ total × 10)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime)
+    total_questions: Mapped[int | None] = mapped_column(Integer)
+    first_try_correct: Mapped[int | None] = mapped_column(Integer)
+    wrong_attempts: Mapped[int | None] = mapped_column(Integer)
+    score: Mapped[float | None] = mapped_column(Float)
+    # v1.4: página do Notion do próprio item (ex.: o laboratório tem página própria no caderno)
+    notion_page_id: Mapped[str | None] = mapped_column(String(64))
 
 
 # --- Estudo e agente ---------------------------------------------------------
+
+
+class TimerSession(TimestampMixin, Base):
+    """v1.4 (D24): uma sessão do cronômetro do Iniciar até o Finalizar/Zerar, com os trechos dentro.
+
+    active_seconds = soma dos trechos; wall_seconds = relógio "oculto" do início ao fim, pausas incluídas.
+    """
+
+    __tablename__ = "timer_session"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    subject_id: Mapped[int | None] = mapped_column(ForeignKey("subject.id", ondelete="SET NULL"))
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime)
+    pauses: Mapped[int] = mapped_column(Integer, default=0)
+    active_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    wall_seconds: Mapped[int | None] = mapped_column(Integer)
+    # finished (Finalizar) | reset (Zerar) | vazio = em andamento
+    end_reason: Mapped[str | None] = mapped_column(String(20))
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 class StudySession(TimestampMixin, Base):
@@ -192,15 +224,23 @@ class StudySession(TimestampMixin, Base):
     # Segundos efetivamente estudados (pausas descontadas)
     seconds: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(Text)
+    # v1.4: sessão do cronômetro a que este trecho pertence
+    timer_session_id: Mapped[int | None] = mapped_column(ForeignKey("timer_session.id", ondelete="SET NULL"))
 
 
 class QuestionSet(TimestampMixin, Base):
     __tablename__ = "question_set"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    topic_id: Mapped[int] = mapped_column(ForeignKey("topic.id", ondelete="CASCADE"))
+    # Vazio só no simulado (D16), que mistura temas de uma disciplina
+    topic_id: Mapped[int | None] = mapped_column(ForeignKey("topic.id", ondelete="CASCADE"))
+    subject_id: Mapped[int | None] = mapped_column(ForeignKey("subject.id", ondelete="CASCADE"))
     # first | retest_1d | retest_7d | retest_21d | retest_3d (revisar)
+    # v1.3 (D15, D16): redo (refazer erradas) | focus_errors | focus_hits | simulation
     attempt_type: Mapped[str] = mapped_column(String(20), default="first")
+    # Conjunto de origem (refazer erradas) e tempo do simulado
+    source_set_id: Mapped[int | None] = mapped_column(ForeignKey("question_set.id", ondelete="SET NULL"))
+    time_limit_minutes: Mapped[int | None] = mapped_column(Integer)
     model: Mapped[str] = mapped_column(String(200))
     prompt_version: Mapped[str] = mapped_column(String(50))
     summary: Mapped[str | None] = mapped_column(Text)
@@ -220,12 +260,16 @@ class Question(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     question_set_id: Mapped[int] = mapped_column(ForeignKey("question_set.id", ondelete="CASCADE"))
+    # Tema da questão (no simulado cada questão vem de um tema); vazio = o tema do conjunto
+    topic_id: Mapped[int | None] = mapped_column(ForeignKey("topic.id", ondelete="SET NULL"))
     position: Mapped[int] = mapped_column(Integer, default=0)
     statement: Mapped[str] = mapped_column(Text)
     options: Mapped[list] = mapped_column(JSON)
     correct_index: Mapped[int] = mapped_column(Integer)
     explanation: Mapped[str | None] = mapped_column(Text)
     flagged_bad: Mapped[bool] = mapped_column(Boolean, default=False)
+    # v1.5: cópia de outra questão (refazer erradas); aponta sempre para a questão original
+    source_question_id: Mapped[int | None] = mapped_column(ForeignKey("question.id", ondelete="SET NULL"))
 
     question_set: Mapped[QuestionSet] = relationship(back_populates="questions")
     answer: Mapped["Answer | None"] = relationship(back_populates="question", cascade="all, delete-orphan", uselist=False)
@@ -252,7 +296,18 @@ class Mistake(TimestampMixin, Base):
     topic_id: Mapped[int] = mapped_column(ForeignKey("topic.id", ondelete="CASCADE"))
     video_minute: Mapped[str | None] = mapped_column(String(20))
     reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # v1.5 (D28): open (não revisado) | reviewed (revisado, falta acertar) | fixed (acertou depois) | again (errou de novo)
+    status: Mapped[str] = mapped_column(String(20), default="open")
     notes: Mapped[str | None] = mapped_column(Text)
+
+    @validates("reviewed")
+    def _sync_status(self, _key: str, value: bool) -> bool:
+        """Rota antiga (PUT /api/mistakes) ainda manda só `reviewed`: mantém o status do ciclo junto."""
+        if value and self.status in (None, "open"):
+            self.status = "reviewed"
+        elif not value and self.status == "reviewed":
+            self.status = "open"
+        return value
 
 
 class ReviewSchedule(TimestampMixin, Base):
@@ -318,13 +373,66 @@ class AccActivity(TimestampMixin, Base):
 # --- Operação ----------------------------------------------------------------
 
 
+class Card(Base):
+    """v1.6 (D32–D37): card de estudo feito a partir dos meus pontos fracos."""
+
+    __tablename__ = "card"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, server_default=func.current_timestamp())
+    topic_id: Mapped[int] = mapped_column(ForeignKey("topic.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20))  # concept | question | confusion
+    mode: Mapped[str] = mapped_column(String(10), default="answer")  # answer (4 alternativas) | flip (virar)
+    front: Mapped[str] = mapped_column(Text)
+    back: Mapped[str] = mapped_column(Text)
+    explanation: Mapped[str | None] = mapped_column(Text)
+    options: Mapped[list | None] = mapped_column(JSON)
+    correct_index: Mapped[int | None] = mapped_column(Integer)
+    # Origem: mistake | text | print | video; o erro de origem liga o card ao ciclo dos erros (D33)
+    source: Mapped[str] = mapped_column(String(10))
+    mistake_id: Mapped[int | None] = mapped_column(ForeignKey("mistake.id", ondelete="SET NULL"))
+    source_label: Mapped[str | None] = mapped_column(String(300))  # print ou arquivo de transcrição
+    chosen_text: Mapped[str | None] = mapped_column(Text)  # o que marquei quando errei
+    video_minute: Mapped[str | None] = mapped_column(String(10))
+    step: Mapped[int] = mapped_column(Integer, default=0)
+    next_review: Mapped[date] = mapped_column(Date, index=True)
+    answer_streak: Mapped[int] = mapped_column(Integer, default=0)
+    day_card_on: Mapped[date | None] = mapped_column(Date)  # card do dia (D37)
+    prompt_version: Mapped[str | None] = mapped_column(String(80))
+    notion_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class CardReview(Base):
+    __tablename__ = "card_review"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    card_id: Mapped[int] = mapped_column(ForeignKey("card.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, server_default=func.current_timestamp())
+    mode: Mapped[str] = mapped_column(String(10))
+    knew: Mapped[bool] = mapped_column(Boolean)
+    chosen_index: Mapped[int | None] = mapped_column(Integer)
+
+
+class ChatMessage(Base):
+    """v1.5: conversa com o agente salva (não some ao recarregar a página)."""
+
+    __tablename__ = "chat_message"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, server_default=func.current_timestamp())
+    role: Mapped[str] = mapped_column(String(20))  # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+    topic_id: Mapped[int | None] = mapped_column(ForeignKey("topic.id", ondelete="SET NULL"))
+    model: Mapped[str | None] = mapped_column(String(200))
+
+
 class LlmCall(Base):
     """Registro de uso do modelo (SPEC §7)."""
 
     __tablename__ = "llm_call"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, server_default=func.current_timestamp())
     model: Mapped[str] = mapped_column(String(200))
     prompt_name: Mapped[str] = mapped_column(String(100))
     prompt_version: Mapped[str] = mapped_column(String(50))

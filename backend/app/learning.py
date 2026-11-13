@@ -3,10 +3,16 @@
 - Primeiro conjunto concluído de um tema → agenda retestes de 1, 7 e 21 dias.
 - Reteste de 7 dias (ou de 3 dias, depois de um "revisar") decide o status:
   nota ≥ limiar (padrão 70%) → "aprendido"; abaixo → "revisar" + novo reteste em 3 dias.
-- Retestes de 1 e 21 dias ficam registrados, mas não mudam o status (o SPEC não define isso).
+- v1.5 (D29, regra "a"): reteste de 21 dias abaixo do limiar manda o tema de volta para "revisar"
+  (+ reteste em 3 dias); acima, não muda nada. O reteste de 1 dia só fica registrado.
+- Refazer erradas, testes de foco e simulado não mudam o status do tema.
+
+Ciclo dos erros (v1.5, D28): open (não revisado) → reviewed (revisado, falta acertar) →
+fixed (acertou num refazer) ou again (errou de novo, revisar de novo).
 """
 
 from datetime import date, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -18,6 +24,15 @@ from .db import get_session
 
 RETEST_DAYS = {"retest_1d": 1, "retest_7d": 7, "retest_21d": 21}
 DECISIVE = {"retest_7d", "retest_3d"}
+# v1.5 (D29): o reteste de 21 dias só pode tirar o "aprendido" (nota abaixo do limiar)
+DEMOTES = {"retest_21d"}
+
+# Ciclo dos erros (D28)
+MISTAKE_STATUSES = ("open", "reviewed", "again", "fixed")
+MISTAKE_LABELS = {"open": "não revisado", "reviewed": "revisado, falta acertar", "again": "revisar de novo",
+                  "fixed": "corrigido"}
+# Erros que ainda pedem atenção (tudo menos "corrigido")
+UNFIXED = ("open", "reviewed", "again")
 
 LABELS = {
     "first": "primeira vez",
@@ -25,11 +40,20 @@ LABELS = {
     "retest_7d": "reteste de 7 dias",
     "retest_21d": "reteste de 21 dias",
     "retest_3d": "reteste de revisão (3 dias)",
+    # v1.3 (D15, D16): fora do ciclo de retestes
+    "redo": "refazer erradas",
+    "focus_errors": "novo teste (erros)",
+    "focus_hits": "novo teste (acertos)",
+    "simulation": "simulado da prova",
 }
+# Tipos que contam para o ciclo do tema (primeira vez + retestes)
+CYCLE = {"first", *RETEST_DAYS, "retest_3d"}
 
 
 def on_set_completed(session: Session, qs: models.QuestionSet) -> None:
     """Chamado quando um conjunto fecha (todas as questões válidas respondidas)."""
+    if qs.attempt_type not in CYCLE or qs.topic_id is None:
+        return  # refazer, testes de foco e simulado ficam só no histórico
     topic = session.get(models.Topic, qs.topic_id)
     done_day = (qs.completed_at or datetime.now()).date()
 
@@ -64,6 +88,43 @@ def on_set_completed(session: Session, qs: models.QuestionSet) -> None:
             topic.learning_status = "review"
             session.add(models.ReviewSchedule(topic_id=qs.topic_id, attempt_type="retest_3d",
                                               due_date=done_day + timedelta(days=3)))
+
+    elif qs.attempt_type in DEMOTES and qs.score is not None:
+        threshold = float(settings_store.get(session, "learned_threshold"))
+        if qs.score < threshold:
+            topic.learning_status = "review"
+            session.add(models.ReviewSchedule(topic_id=qs.topic_id, attempt_type="retest_3d",
+                                              due_date=done_day + timedelta(days=3)))
+
+
+def record_retry(session: Session, question: models.Question, correct: bool, topic_id: int | None) -> None:
+    """Resposta numa cópia do "refazer erradas" (D28): atualiza o erro da questão original.
+
+    Não cria um erro novo na cópia: acertou → "fixed"; errou → "again".
+    """
+    root_id = question.source_question_id
+    mistake = session.scalars(select(models.Mistake).where(models.Mistake.question_id == root_id)).first()
+    if mistake is None:
+        if correct or topic_id is None:
+            return
+        mistake = models.Mistake(question_id=root_id, topic_id=topic_id)
+        session.add(mistake)
+    mistake.status = "fixed" if correct else "again"
+    mistake.reviewed = True
+
+
+def mistake_counts(session: Session, *, topic_id: int | None = None, subject_id: int | None = None) -> dict:
+    """Erros por status (D28) de um tema ou de uma disciplina."""
+    stmt = select(models.Mistake.status)
+    if topic_id is not None:
+        stmt = stmt.where(models.Mistake.topic_id == topic_id)
+    if subject_id is not None:
+        stmt = stmt.join(models.Topic, models.Topic.id == models.Mistake.topic_id).where(
+            models.Topic.subject_id == subject_id)
+    counts = dict.fromkeys(MISTAKE_STATUSES, 0)
+    for status in session.scalars(stmt).all():
+        counts[status if status in counts else "open"] += 1
+    return counts
 
 
 def due_reviews(session: Session, today: date) -> list[models.ReviewSchedule]:
@@ -116,7 +177,10 @@ def topic_scores(subject_id: int | None = None, session: Session = Depends(get_s
         ).all()
         if not sets:
             continue
-        first = next((s for s in sets if s.attempt_type == "first"), None)
+        cycle = [s for s in sets if s.attempt_type in CYCLE]
+        if not cycle:
+            continue
+        first = next((s for s in cycle if s.attempt_type == "first"), None)
         decisive = [s for s in sets if s.attempt_type in DECISIVE]
         next_review = session.scalars(
             select(models.ReviewSchedule)
@@ -128,8 +192,8 @@ def topic_scores(subject_id: int | None = None, session: Session = Depends(get_s
             "subject_name": topic.subject.name, "status": topic.learning_status,
             "first_score": first.score if first else None,
             "decisive_score": decisive[-1].score if decisive else None,
-            "last_score": sets[-1].score, "last_attempt": LABELS[sets[-1].attempt_type],
-            "attempts": len(sets),
+            "last_score": cycle[-1].score, "last_attempt": LABELS.get(cycle[-1].attempt_type, cycle[-1].attempt_type),
+            "attempts": len(cycle),
             "next_review": ({"date": next_review.due_date.isoformat(), "label": LABELS[next_review.attempt_type]}
                             if next_review else None),
         })
@@ -140,11 +204,17 @@ def topic_scores(subject_id: int | None = None, session: Session = Depends(get_s
 
 
 @router.get("/mistakes")
-def mistakes_to_review(include_reviewed: bool = False, subject_id: int | None = None,
+def mistakes_to_review(status: str | None = Query(None, description="open,reviewed,again,fixed; padrão = sem os corrigidos"),
+                       include_reviewed: bool = False, subject_id: int | None = None, topic_id: int | None = None,
                        session: Session = Depends(get_session)):
-    stmt = select(models.Mistake).order_by(models.Mistake.created_at.desc())
-    if not include_reviewed:
-        stmt = stmt.where(models.Mistake.reviewed.is_(False))
+    """Erros para revisar (D28). Padrão: todos menos os corrigidos; `include_reviewed` = todos."""
+    wanted = [x for x in (status or "").split(",") if x in MISTAKE_STATUSES]
+    if not wanted:
+        wanted = list(MISTAKE_STATUSES) if include_reviewed else list(UNFIXED)
+    stmt = (select(models.Mistake).where(models.Mistake.status.in_(wanted))
+            .order_by(models.Mistake.updated_at.desc(), models.Mistake.id.desc()))
+    if topic_id is not None:
+        stmt = stmt.where(models.Mistake.topic_id == topic_id)
     out = []
     for m in session.scalars(stmt).all():
         q = session.get(models.Question, m.question_id)
@@ -156,9 +226,31 @@ def mistakes_to_review(include_reviewed: bool = False, subject_id: int | None = 
             "id": m.id, "topic_id": topic.id, "topic_title": topic.title, "subject_name": subject.name,
             "statement": q.statement, "options": q.options, "correct_index": q.correct_index,
             "chosen_index": q.answer.chosen_index if q.answer else None, "explanation": q.explanation,
-            "video_minute": m.video_minute, "reviewed": m.reviewed,
+            "video_minute": m.video_minute, "reviewed": m.reviewed, "status": m.status,
+            "status_label": MISTAKE_LABELS.get(m.status, m.status), "subject_id": subject.id,
         })
     return out
+
+
+@router.get("/mistakes/summary")
+def mistakes_summary(subject_id: int | None = None, session: Session = Depends(get_session)):
+    return mistake_counts(session, subject_id=subject_id)
+
+
+class MistakeStatusIn(BaseModel):
+    # Só "revisado" é manual; corrigido e revisar de novo vêm das respostas no refazer
+    status: Literal["open", "reviewed"]
+
+
+@router.patch("/mistakes/{mistake_id}")
+def set_mistake_status(mistake_id: int, data: MistakeStatusIn, session: Session = Depends(get_session)):
+    m = session.get(models.Mistake, mistake_id)
+    if m is None:
+        raise HTTPException(404, "erro não encontrado")
+    m.status = data.status
+    m.reviewed = data.status != "open"
+    session.commit()
+    return {"id": m.id, "status": m.status, "status_label": MISTAKE_LABELS[m.status]}
 
 
 # --- Checklist do dia (exceção E11 do DS: marcar conclui na hora) -------------
@@ -241,6 +333,15 @@ def plan_day(day: date | None = Query(None), session: Session = Depends(get_sess
         position += 1
         session.add(models.ChecklistItem(day=day, label=f"{info['label'].capitalize()}: {info['topic_title']} · {info['subject_name']}",
                                          topic_id=r.topic_id, review_id=r.id, position=position))
+        added += 1
+
+    # v1.6 (D35): cards vencidos viram um item do dia (um só, com a contagem)
+    from . import cards  # import local: cards depende deste módulo
+
+    due_cards = cards.due_count(session, day)
+    if due_cards and not any(lbl.startswith("Revisar cards") for lbl in have_labels):
+        position += 1
+        session.add(models.ChecklistItem(day=day, label=f"Revisar cards vencidos ({due_cards})", position=position))
         added += 1
 
     action = compute_overview(session, day)["next_study_action"]

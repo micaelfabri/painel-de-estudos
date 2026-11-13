@@ -29,6 +29,8 @@ class RulePart(BaseModel):
     label: str
     max: float
     counts_if: dict[str, Any] | None = None
+    # v1.5: de onde vem a nota prevista: "exam" (melhor nota de prova) | "mocks" (soma dos simulados)
+    source: str | None = None
 
 
 class GradingRule(BaseModel):
@@ -100,6 +102,61 @@ def evaluate(rule: GradingRule, data: GradeInput) -> GradeResult:
     return GradeResult(total=total, counted=counted, ignored=ignored, passed=passed, reasons=reasons, missing=missing)
 
 
+# --- Nota prevista (v1.5, D30) -----------------------------------------------
+
+# Parte sem "source" na regra: AV/AVS vem das provas, Progresso Acadêmico dos simulados (SPEC §5)
+DEFAULT_SOURCE = {"av": "exam", "pa": "mocks"}
+SOURCE_LABELS = {"exam": "nota da prova", "mocks": "soma dos simulados"}
+
+
+def predict(rule: GradingRule, exam_scores: list[float], mock_scores: list[float | None]) -> dict:
+    """Nota prevista com o que já foi lançado; diz quanto falta na prova para passar.
+
+    exam_scores: notas de prova lançadas (vale a maior, AV ou AVS); mock_scores: um item por simulado
+    (None = ainda sem nota).
+    """
+    scores: dict[str, float] = {}
+    parts = []
+    for part in rule.parts:
+        source = part.source or DEFAULT_SOURCE.get(part.key)
+        value: float | None = None
+        pending = 0
+        if source == "exam" and exam_scores:
+            value = min(max(exam_scores), part.max)
+        elif source == "mocks" and mock_scores:
+            done = [v for v in mock_scores if v is not None]
+            pending = len(mock_scores) - len(done)
+            # Simulado sem nota conta 0 por enquanto (previsão conservadora); "pending" avisa quantos faltam
+            value = min(round(sum(done), 2), part.max)
+        if value is not None:
+            scores[part.key] = value
+        parts.append({"key": part.key, "label": part.label, "max": part.max, "value": value,
+                      "source": source, "source_label": SOURCE_LABELS.get(source or "", "lançar à mão"),
+                      "pending": pending})
+
+    missing = [p for p in parts if p["value"] is None]
+    out: dict[str, Any] = {"label": rule.label, "to_check": rule.to_check, "pass_min": rule.pass_min,
+                           "max_total": rule.max_total, "parts": parts, "total": None, "passed": None,
+                           "needed": None, "known_total": round(sum(scores.values()), 2)}
+    if not missing:
+        result = evaluate(rule, GradeInput(scores=scores))
+        out["total"], out["passed"] = result.total, result.total >= rule.pass_min
+        return out
+    # Quanto falta: menor nota na prova (única parte faltando) que faz passar, em passos de 0,1
+    exam_missing = [p for p in missing if p["source"] == "exam"]
+    if len(missing) == 1 and exam_missing:
+        part = exam_missing[0]
+        steps = int(round(part["max"] * 10))
+        for i in range(steps + 1):
+            trial = {**scores, part["key"]: i / 10}
+            if evaluate(rule, GradeInput(scores=trial)).total >= rule.pass_min:
+                out["needed"] = {"key": part["key"], "label": part["label"], "value": i / 10, "possible": True}
+                break
+        else:
+            out["needed"] = {"key": part["key"], "label": part["label"], "value": None, "possible": False}
+    return out
+
+
 # Modelos de regra conhecidos (SPEC §5). Ficam disponíveis no modo Gerenciar.
 PRESETS: dict[str, dict] = {
     "padrao_2026": {
@@ -114,7 +171,7 @@ PRESETS: dict[str, dict] = {
         "source": "Planos de ensino 2026. O e-book de jan/2024 descreve AV 0–10 + AVAs até +2; a confirmar qual vale.",
     },
     "padroes_java": {
-        "label": "Padrões de Projetos com Java",
+        "label": "Padrões de Projeto",
         "pass_min": 6,
         "max_total": 10,
         "parts": [{"key": "av", "label": "AV/AVS", "max": 10}],

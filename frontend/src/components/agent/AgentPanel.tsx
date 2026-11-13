@@ -1,12 +1,14 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { AlertTriangle, Bot, RotateCcw, Sparkles, Timer, X } from "lucide-react";
+import { AlertTriangle, Layers, RotateCcw, Sparkles, Timer, X } from "lucide-react";
 import * as React from "react";
 
+import { CardSessionView, startDue } from "@/components/cards/CardSessionView";
 import { Button } from "@/components/ui/button";
 import { SheetContent } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { useAgent } from "./AgentContext";
+import { BurroAvatar } from "./BurroAvatar";
 import { ChatInput, MessageList } from "./Conversation";
 import { DailyChecklist } from "./DailyChecklist";
 import { GenerateForm } from "./GenerateForm";
@@ -41,7 +43,10 @@ function ModelStatus() {
         value={model ?? ""}
         onValueChange={setModel}
         placeholder="Escolha um modelo"
-        options={models.models.map((m) => ({ value: m, label: m === models.default_model ? `${m} (padrão)` : m }))}
+        options={models.models.map((m) => ({
+          value: m,
+          label: m === models.default_model ? `${m} (padrão)` : m,
+        }))}
       />
     </div>
   );
@@ -49,7 +54,7 @@ function ModelStatus() {
 
 /** Conteúdo do painel do agente (igual na coluna lg e no Sheet) */
 function AgentPanelBody({ onClose }: { onClose?: () => void }) {
-  const { activeSet, preset, bumpLearning } = useAgent();
+  const { activeSet, preset, bumpLearning, cardSession, openCards, closeCards } = useAgent();
   const [showForm, setShowForm] = React.useState(false);
   const [reviewing, setReviewing] = React.useState(false);
 
@@ -60,6 +65,21 @@ function AgentPanelBody({ onClose }: { onClose?: () => void }) {
       setShowForm(true);
     }
   }, [preset]);
+  // Conjunto aberto pelo histórico ou por refazer/simulado: mostra as questões
+  React.useEffect(() => {
+    if (activeSet) {
+      setReviewing(false);
+      setShowForm(false);
+      closeCards();
+    }
+  }, [activeSet?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // v1.6: cards abertos (botão, página Cards ou rodada rápida) ocupam o lugar da conversa
+  React.useEffect(() => {
+    if (cardSession) {
+      setReviewing(false);
+      setShowForm(false);
+    }
+  }, [cardSession?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const showQuestions = activeSet !== null && !showForm;
 
@@ -76,10 +96,12 @@ function AgentPanelBody({ onClose }: { onClose?: () => void }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-border p-4">
-        <Bot className="h-5 w-5 text-primary-text" aria-hidden="true" />
-        <h2 className="flex-1 text-base font-semibold">Agente de estudos</h2>
+        <BurroAvatar />
+        <h2 className="flex-1 text-base font-semibold">
+          Burro bot <span className="text-xs font-normal text-muted-foreground">agente de estudos</span>
+        </h2>
         {onClose && (
-          <Button variant="ghost" size="icon" aria-label="Fechar agente" onClick={onClose}>
+          <Button variant="ghost" size="icon" aria-label="Fechar o Burro bot" onClick={onClose}>
             <X aria-hidden="true" />
           </Button>
         )}
@@ -100,11 +122,23 @@ function AgentPanelBody({ onClose }: { onClose?: () => void }) {
           <Button
             variant={reviewing ? "secondary" : "outline"}
             size="sm"
-            onClick={() => setReviewing((v) => !v)}
+            onClick={() => {
+              closeCards();
+              setReviewing((v) => !v);
+            }}
             aria-expanded={reviewing}
           >
             <RotateCcw aria-hidden="true" />
             Revisar erros
+          </Button>
+          <Button
+            variant={cardSession ? "secondary" : "outline"}
+            size="sm"
+            onClick={() => (cardSession ? closeCards() : void startDue(openCards))}
+            aria-expanded={cardSession !== null}
+          >
+            <Layers aria-hidden="true" />
+            Cards
           </Button>
           <Button variant="outline" size="sm" onClick={goToTimer}>
             <Timer aria-hidden="true" />
@@ -113,7 +147,9 @@ function AgentPanelBody({ onClose }: { onClose?: () => void }) {
         </div>
         <DailyChecklist />
         {showForm && <GenerateForm onDone={() => setShowForm(false)} />}
-        {reviewing ? (
+        {cardSession ? (
+          <CardSessionView key={cardSession.key} />
+        ) : reviewing ? (
           <ReviewMistakes onClose={() => setReviewing(false)} />
         ) : (
           <MessageList scrollRef={scrollRef}>{showQuestions && <QuestionFlow onFinished={bumpLearning} />}</MessageList>
@@ -132,7 +168,7 @@ export function AgentAside() {
   return (
     <aside
       role="complementary"
-      aria-label="Agente de estudos"
+      aria-label="Burro bot, agente de estudos"
       className="hidden w-80 shrink-0 border-l border-border bg-card lg:flex lg:flex-col xl:w-96"
     >
       <AgentPanelBody />
@@ -146,11 +182,11 @@ export function AgentSheetTrigger() {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger asChild>
-        <Button variant="ghost" size="icon" aria-label="Abrir agente" className="lg:hidden">
-          <Bot aria-hidden="true" />
+        <Button variant="ghost" size="icon" aria-label="Abrir o Burro bot" className="lg:hidden">
+          <BurroAvatar className="h-6 w-6" />
         </Button>
       </DialogPrimitive.Trigger>
-      <SheetContent side="right" title="Agente de estudos" className="xl:w-96">
+      <SheetContent side="right" title="Burro bot, agente de estudos" className="xl:w-96">
         <AgentPanelBody onClose={() => setOpen(false)} />
       </SheetContent>
     </DialogPrimitive.Root>

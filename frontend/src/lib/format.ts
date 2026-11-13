@@ -21,6 +21,11 @@ export const formatTime = (d: Date) => new Intl.DateTimeFormat(LOCALE, { hour: "
 
 export const formatWeekdayShort = (d: Date) => new Intl.DateTimeFormat(LOCALE, { weekday: "short" }).format(d).replace(".", "");
 
+export const formatWeekdayLong = (d: Date) => {
+  const w = new Intl.DateTimeFormat(LOCALE, { weekday: "long" }).format(d);
+  return w.charAt(0).toUpperCase() + w.slice(1);
+};
+
 export const formatLongDate = (d: Date) =>
   new Intl.DateTimeFormat(LOCALE, { weekday: "long", day: "numeric", month: "long" }).format(d);
 

@@ -3,7 +3,7 @@ import * as React from "react";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-export interface Column<T> {
+interface Column<T> {
   header: string;
   cell: (row: T) => React.ReactNode;
   numeric?: boolean;

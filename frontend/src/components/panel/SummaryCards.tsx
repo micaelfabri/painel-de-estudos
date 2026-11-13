@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardEyebrow } from "@/components/ui/card";
 import type { NextActionAny, Overview } from "@/lib/api";
 import {
@@ -38,7 +39,10 @@ export function NextExamCard({ exams }: { exams: Overview["upcoming_exams"] }) {
                   {first.location ? ` · ${first.location}` : ""}
                 </span>
               ) : (
-                <span className="text-muted-foreground"> · agendar até {formatDayMonth(parseLocalDate(first.schedule_by!))}</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  · agendar até {formatDayMonth(parseLocalDate(first.schedule_by!))}
+                </span>
               )}
             </p>
             {rest.length > 0 && (
@@ -101,7 +105,9 @@ export function WeekHoursCard({ week, today }: { week: Overview["week"]; today: 
                     style={{ height: `${Math.max(4, (d.seconds / max) * 40)}px` }}
                   />
                 </div>
-                <span className={cn("text-xs", d.date === today ? "font-medium text-foreground" : "text-muted-foreground")}>
+                <span
+                  className={cn("text-xs", d.date === today ? "font-medium text-foreground" : "text-muted-foreground")}
+                >
                   {formatWeekdayShort(date).slice(0, 3)}
                 </span>
                 <span className="sr-only">{formatDuration(d.seconds)}</span>
@@ -115,7 +121,15 @@ export function WeekHoursCard({ week, today }: { week: Overview["week"]; today: 
 }
 
 /** Próxima ação sugerida: reteste vencido primeiro; senão, prova mais próxima e menor progresso */
-export function NextActionCard({ action }: { action: NextActionAny | null }) {
+export function NextActionCard({
+  action,
+  cardsDue = 0,
+  onCards,
+}: {
+  action: NextActionAny | null;
+  cardsDue?: number;
+  onCards?: () => void;
+}) {
   return (
     <Card>
       <CardContent className="space-y-2">
@@ -145,6 +159,17 @@ export function NextActionCard({ action }: { action: NextActionAny | null }) {
               </p>
             )}
           </>
+        )}
+        {cardsDue > 0 && (
+          // v1.6 (D35): cards vencidos hoje junto da próxima ação
+          <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+            {cardsDue === 1 ? "1 card para revisar hoje" : `${cardsDue} cards para revisar hoje`}
+            {onCards && (
+              <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={onCards}>
+                Revisar agora
+              </Button>
+            )}
+          </p>
         )}
       </CardContent>
     </Card>

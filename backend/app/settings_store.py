@@ -24,6 +24,12 @@ KNOWN: dict[str, tuple[Any, Any, str]] = {
     "learned_threshold": (float, 0.7, "Nota mínima no reteste de 7 dias para 'aprendido'"),
     "calendar_id": (str | None, None, "ID da agenda do Google usada pelo painel"),
     "notion_page_ids": (list[str], [], "Páginas do Notion compartilhadas com a integração"),
+    "exam_minutes": (int, 60, "Tempo do simulado da prova, em minutos (D16)"),
+    "agent_reads_metrics": (bool, True, "O agente pode ler um resumo dos meus números de estudo (horas, notas, temas)"),
+    "vision_model": (str | None, None, "Modelo que lê imagens, para as notas pelos prints (vazio = modelo padrão)"),
+    "github_url": (str | None, None, "Link do GitHub no rodapé"),
+    "linkedin_url": (str | None, None, "Link do LinkedIn no rodapé"),
+    "site_url": (str | None, None, "Link do site pessoal no rodapé (vazio = 'em breve')"),
 }
 
 
@@ -47,6 +53,10 @@ def put(session: Session, key: str, value: Any) -> Any:
     value = _adapter(key).validate_python(value)
     if key == "llm_base_url":
         _check_llm_url(value)
+    if key in ("github_url", "linkedin_url", "site_url") and value:
+        _check_https(value)
+    if key == "exam_minutes" and not 5 <= value <= 300:
+        raise ValueError("exam_minutes precisa ficar entre 5 e 300")
     if key == "llm_timeout_seconds" and not 30 <= value <= 3600:
         raise ValueError("llm_timeout_seconds precisa ficar entre 30 e 3600")
     row = session.get(Setting, key)
@@ -65,6 +75,15 @@ def _check_llm_url(value: str) -> None:
     parts = urlsplit(value.strip())
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise ValueError("llm_base_url precisa ser http:// ou https:// com host")
+
+
+def _check_https(value: str) -> None:
+    """Links do rodapé: só https:// com host (vão para href)."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(value.strip())
+    if parts.scheme != "https" or not parts.hostname:
+        raise ValueError("o link precisa começar com https://")
 
 
 def describe() -> list[dict[str, Any]]:

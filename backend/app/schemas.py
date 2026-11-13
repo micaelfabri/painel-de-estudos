@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .grading import GradingRule
 
@@ -129,6 +129,7 @@ class ExamIn(BaseModel):
     score: float | None = Field(default=None, ge=0)
     gcal_event_id: str | None = None
     notes: str | None = None
+    done_at: datetime | None = None
 
 
 class ExamOut(ExamIn, ORM):
@@ -139,9 +140,26 @@ class DeadlineIn(BaseModel):
     subject_id: int | None = None
     title: str = Field(min_length=1, max_length=300)
     due_date: date
-    kind: Literal["deadline", "event"] = "deadline"
+    kind: Literal["deadline", "event", "lab", "activity", "mock"] = "deadline"
     gcal_event_id: str | None = None
     notes: str | None = None
+    # v1.3 (D14, D17): concluído e resultado de labs/atividades
+    done_at: datetime | None = None
+    total_questions: int | None = Field(default=None, ge=1, le=500)
+    first_try_correct: int | None = Field(default=None, ge=0, le=500)
+    wrong_attempts: int | None = Field(default=None, ge=0, le=5000)
+    score: float | None = Field(default=None, ge=0, le=10)
+    notion_page_id: str | None = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def _score(self):
+        # D17: nota = acertos de primeira ÷ total × 10, quando não vier preenchida
+        if self.total_questions and self.first_try_correct is not None:
+            if self.first_try_correct > self.total_questions:
+                raise ValueError("acertos de primeira maior que o total de questões")
+            if self.score is None:
+                self.score = round(self.first_try_correct / self.total_questions * 10, 1)
+        return self
 
 
 class DeadlineOut(DeadlineIn, ORM):
@@ -181,11 +199,6 @@ class AccRuleOut(AccRuleIn, ORM):
 # --- Configurações -----------------------------------------------------------
 
 
-class SettingOut(ORM):
-    key: str
-    value: object
-
-
 class SettingIn(BaseModel):
     value: object
 
@@ -200,6 +213,7 @@ class StudySessionIn(BaseModel):
     ended_at: datetime | None = None
     seconds: int = Field(ge=0, le=24 * 3600)
     notes: str | None = None
+    timer_session_id: int | None = None
 
 
 class StudySessionOut(StudySessionIn, ORM):

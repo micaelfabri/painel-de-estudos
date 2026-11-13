@@ -7,16 +7,16 @@ from urllib.parse import urlsplit
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import course, learning, models, overview, schemas, settings_store
+from . import cards, course, learning, models, overview, schemas, settings_store, study
 from .agent.router import router as agent_router
 from .crud import crud_router
 from .db import get_session
-from .integrations import google_calendar, notion
 from .grading import PRESETS, GradeInput, GradeResult, GradingRule, evaluate
+from .integrations import google_calendar, notion, prints
 
 app = FastAPI(title="Painel de Estudos", version="0.1.0")
 
@@ -110,6 +110,9 @@ app.include_router(
 app.include_router(overview.router)
 app.include_router(agent_router)
 app.include_router(learning.router)
+app.include_router(study.router)
+app.include_router(cards.router)
+app.include_router(prints.router)
 app.include_router(course.router)
 app.include_router(notion.router)
 app.include_router(google_calendar.router)

@@ -25,3 +25,4 @@ eval/topics/*.txt
 eval/results/
 # Relatórios da F0 trazem resumos/questões gerados do material das matérias; versione só o escolhido com git add -f
 eval/RESULTS_*.md
+materiais

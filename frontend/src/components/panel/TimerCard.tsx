@@ -18,10 +18,22 @@ interface TimerCardProps {
 
 /** Cronômetro de estudo: meta por tema e alarme vêm das configurações */
 export function TimerCard({ subjects, goalMinutes, alarmMinutes, onSaved }: TimerCardProps) {
-  const timer = useStudyTimer(goalMinutes, alarmMinutes, (seconds) => {
-    toast.success(`Sessão de ${formatDuration(seconds)} salva`);
-    onSaved();
-  });
+  const timer = useStudyTimer(
+    goalMinutes,
+    alarmMinutes,
+    (seconds) => {
+      toast.success(`Trecho de ${formatDuration(seconds)} salvo`);
+      onSaved();
+    },
+    (t) => {
+      // Resumo da sessão: tempo estudado, tempo total (relógio oculto) e pausas (D24)
+      toast.success(
+        `Sessão ${t.end_reason === "finished" ? "finalizada" : "zerada"}: ${formatDuration(t.active_seconds)} estudados` +
+          `${t.wall_seconds ? ` em ${formatDuration(t.wall_seconds)} no total` : ""}, ${t.pauses} pausa(s).`,
+      );
+      onSaved();
+    },
+  );
 
   const handle = (fn: () => Promise<void> | void) => async () => {
     try {
@@ -51,15 +63,23 @@ export function TimerCard({ subjects, goalMinutes, alarmMinutes, onSaved }: Time
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              Meta de {formatDuration(goalMinutes * 60)} por tema, alarme em {formatDuration(alarmMinutes * 60)}. Cada pausa salva
-              o trecho estudado.
+              Meta de {formatDuration(goalMinutes * 60)} por tema, alarme em {formatDuration(alarmMinutes * 60)}. Cada
+              pausa salva o trecho estudado; Finalizar fecha a sessão com o tempo total e as pausas.
             </p>
-            <div className="flex gap-3">
+            {timer.status !== "idle" && (
+              <p className="text-xs text-muted-foreground" aria-live="polite">
+                {timer.pauses} {timer.pauses === 1 ? "pausa" : "pausas"} nesta sessão
+              </p>
+            )}
+            <div className="flex flex-wrap gap-3">
               {timer.running ? (
                 <Button onClick={handle(timer.pause)}>Pausar</Button>
               ) : (
                 <Button onClick={handle(timer.start)}>Iniciar</Button>
               )}
+              <Button variant="secondary" onClick={handle(timer.finish)} disabled={timer.status === "idle"}>
+                Finalizar
+              </Button>
               <Button variant="outline" onClick={handle(timer.reset)} disabled={timer.status === "idle"}>
                 Zerar
               </Button>

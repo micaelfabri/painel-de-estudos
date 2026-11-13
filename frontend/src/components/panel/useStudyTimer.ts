@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { api } from "@/lib/api";
+import { api, type TimerSessionView } from "@/lib/api";
 import { toIsoLocal } from "@/lib/format";
 import { playAlarm, playGoal, unlockAudio } from "@/lib/sound";
 
@@ -14,9 +14,21 @@ interface StoredTimer {
   accumulated: number;
   /** Início do trecho atual (ms), quando rodando */
   chunkStart: number | null;
+  /** v1.4 (D24): sessão no servidor, início do relógio oculto e quantas pausas */
+  timerId?: number | null;
+  sessionStart?: number | null;
+  pauses?: number;
 }
 
-const EMPTY: StoredTimer = { subjectId: null, running: false, accumulated: 0, chunkStart: null };
+const EMPTY: StoredTimer = {
+  subjectId: null,
+  running: false,
+  accumulated: 0,
+  chunkStart: null,
+  timerId: null,
+  sessionStart: null,
+  pauses: 0,
+};
 
 function load(): StoredTimer {
   try {
@@ -38,12 +50,18 @@ function save(state: StoredTimer) {
 export type TimerState = "idle" | "running" | "paused" | "past_goal" | "alarm";
 
 /**
- * Cronômetro de estudo. Cada trecho entre Iniciar e Pausar vira uma sessão salva
- * na API (SPEC §6.1: cada sessão é salva), então nada se perde ao zerar.
+ * Cronômetro de estudo. Cada trecho entre Iniciar e Pausar vira um trecho salvo na API
+ * (SPEC §6.1). Desde a v1.4 (D24) os trechos ficam dentro de uma sessão do cronômetro,
+ * que conta as pausas e um relógio "oculto" do primeiro Iniciar até Finalizar ou Zerar.
  */
 const ALARM_REPEAT = 10 * 60; // segundos entre repetições do alarme
 
-export function useStudyTimer(goalMinutes: number, alarmMinutes: number, onSaved?: (seconds: number) => void) {
+export function useStudyTimer(
+  goalMinutes: number,
+  alarmMinutes: number,
+  onSaved?: (seconds: number) => void,
+  onClosed?: (session: TimerSessionView) => void,
+) {
   const [state, setState] = React.useState<StoredTimer>(load);
   const [now, setNow] = React.useState(() => Date.now());
 
@@ -76,7 +94,8 @@ export function useStudyTimer(goalMinutes: number, alarmMinutes: number, onSaved
     lastStatus.current = status;
     if (status === "past_goal" && prev === "running") playGoal();
     if (status === "alarm") {
-      const due = prev !== "alarm" ? prev === "past_goal" || prev === "running" : elapsed - lastAlarmAt.current >= ALARM_REPEAT;
+      const due =
+        prev !== "alarm" ? prev === "past_goal" || prev === "running" : elapsed - lastAlarmAt.current >= ALARM_REPEAT;
       if (due) {
         lastAlarmAt.current = elapsed;
         playAlarm();
@@ -85,38 +104,93 @@ export function useStudyTimer(goalMinutes: number, alarmMinutes: number, onSaved
   }, [status, elapsed]);
 
   const persistChunk = React.useCallback(
-    async (start: number, seconds: number, subjectId: number | null) => {
+    async (start: number, seconds: number, subjectId: number | null, timerId: number | null) => {
       if (seconds < 1) return;
       await api.post("/study-sessions", {
         subject_id: subjectId,
         started_at: toIsoLocal(new Date(start)),
         ended_at: toIsoLocal(new Date(start + seconds * 1000)),
         seconds,
+        timer_session_id: timerId,
       });
       onSaved?.(seconds);
     },
     [onSaved],
   );
 
+  // v1.5: a sessão do servidor pode ainda estar sendo criada quando chega a primeira pausa;
+  // os trechos esperam por esta promessa para não ficarem sem sessão
+  const opening = React.useRef<Promise<number | null> | null>(null);
+  const timerIdNow = async (): Promise<number | null> =>
+    state.timerId ?? (opening.current ? await opening.current : null);
+
   const start = () => {
     unlockAudio();
-    setNow(Date.now());
-    setState((s) => ({ ...s, running: true, chunkStart: Date.now() }));
+    const at = Date.now();
+    setNow(at);
+    setState((s) => ({ ...s, running: true, chunkStart: at, sessionStart: s.sessionStart ?? at }));
+    if (state.timerId == null && opening.current == null) {
+      // Primeiro Iniciar: abre a sessão no servidor sem atrasar o cronômetro (se falhar, seguem só os trechos)
+      opening.current = api
+        .post<TimerSessionView>("/study/timer-sessions", {
+          subject_id: state.subjectId,
+          started_at: toIsoLocal(new Date(at)),
+        })
+        .then((t) => {
+          setState((s) => ({ ...s, timerId: s.timerId ?? t.id }));
+          return t.id;
+        })
+        .catch(() => null);
+    }
   };
 
-  const pause = async () => {
+  /** Fecha o trecho atual; `countPause` = foi o botão Pausar (Finalizar/Zerar não contam como pausa) */
+  const stopChunk = async (countPause: boolean) => {
     const chunkStart = state.chunkStart ?? Date.now();
     const seconds = Math.floor((Date.now() - chunkStart) / 1000);
-    setState((s) => ({ ...s, running: false, chunkStart: null, accumulated: s.accumulated + seconds }));
-    await persistChunk(chunkStart, seconds, state.subjectId);
+    const pauses = (state.pauses ?? 0) + (countPause ? 1 : 0);
+    setState((s) => ({ ...s, running: false, chunkStart: null, accumulated: s.accumulated + seconds, pauses }));
+    const timerId = await timerIdNow();
+    await persistChunk(chunkStart, seconds, state.subjectId, timerId);
+    if (countPause && timerId) await api.patch(`/study/timer-sessions/${timerId}`, { pauses });
   };
 
-  const reset = async () => {
-    if (state.running) await pause();
+  const pause = () => stopChunk(true);
+
+  const close = async (reason: "finished" | "reset") => {
+    if (state.running) await stopChunk(false);
+    const timerId = await timerIdNow();
+    opening.current = null;
     setState((s) => ({ ...EMPTY, subjectId: s.subjectId }));
+    if (timerId) {
+      const t = await api.patch<TimerSessionView>(`/study/timer-sessions/${timerId}`, {
+        end_reason: reason,
+        ended_at: toIsoLocal(new Date()),
+      });
+      onClosed?.(t);
+    }
   };
 
-  const setSubject = (subjectId: number | null) => setState((s) => ({ ...s, subjectId }));
+  const reset = () => close("reset");
+  const finish = () => close("finished");
 
-  return { elapsed, status, goal, running: state.running, subjectId: state.subjectId, start, pause, reset, setSubject };
+  const setSubject = (subjectId: number | null) => {
+    setState((s) => ({ ...s, subjectId }));
+    if (state.timerId)
+      void api.patch(`/study/timer-sessions/${state.timerId}`, { subject_id: subjectId }).catch(() => {});
+  };
+
+  return {
+    elapsed,
+    status,
+    goal,
+    running: state.running,
+    subjectId: state.subjectId,
+    pauses: state.pauses ?? 0,
+    start,
+    pause,
+    reset,
+    finish,
+    setSubject,
+  };
 }

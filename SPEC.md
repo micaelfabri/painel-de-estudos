@@ -1,6 +1,6 @@
 # SPEC — Painel de Estudos (painel-de-estudos)
 
-Version 1.2 · 09/11/2026 · Owner: (seu nome aqui) · Builder: Claude Code
+Version 1.6 · 12/11/2026 · Owner: (seu nome aqui) · Builder: Claude Code
 Bilingual file (DIRETRIZ_BILINGUE_v1): English first, Portuguese after. If they differ, the Portuguese prevails.
 
 ---
@@ -42,7 +42,7 @@ Degree → Semester → Subject → Topic. Covers the current degree (e.g. Engen
 
 Grading rule is data, not code. Example rules, taken from real 2026 teaching plans (pass with 6+):
 - Standard: AV/AVS 0–8 + Progresso Acadêmico 0–2.
-- Padrões de Projetos com Java: AV/AVS 0–10, in person, 75% attendance.
+- Padrões de Projeto: AV/AVS 0–10, in person, 75% attendance.
 - Arquitetura de Sistemas: AV/AVS 0–10 + AP 0–2; AP only counts if AV/AVS ≥ 4.
 - Extensionistas: own rule (extension activity 2 points + mock tests).
 - Subjects with a lab: the exam unlocks only after the lab.
@@ -120,6 +120,7 @@ To verify in phase 0: the container reaching Ollama on the host without exposing
 - Notion integration sees only the pages I share with it.
 - Calendar: never delete; only edit events with `painel=1`.
 - Public portfolio copy: mock data only, no grades, no real Notion or Calendar data.
+- Prints of my answers go only to the local model (D17), and only from linked Notion pages or the materials folder (D18).
 
 ### 11. Pending
 Requests to the faculty chat (prints from the portal):
@@ -146,6 +147,72 @@ Build starts after 08/12/2026.
 ### 13. Initial seed (F1)
 
 This public copy ships with **fictional data** (`backend/app/seed.py`): an example degree, five current subjects with exams, portal progress, pending subjects and an ACC starting entry. The real data lives only in the owner's private copy.
+
+### 14. Version 1.3 (12/11/2026, after the first real use)
+| # | Decision |
+|---|---|
+| D13 | Study mode gets three pages: **Painel**, **Provas e prazos** and **Histórico**. |
+| D14 | **Provas e prazos** (study side): exams, deadlines, events, labs and activities in one list; each one can be edited and marked done. Labs and activities are deadlines of kind `lab` / `activity`. |
+| D15 | **Histórico**: every question set stays saved and visible (date, type, topic, score), per-topic evolution, and three actions: redo the wrong questions (no model call), new test based on my mistakes, new test based on my right answers. |
+| D16 | **Exam simulation**: one set that mixes the topics of one subject, same size as the real exam (settings: 10 questions, 60 minutes), with a countdown. Counts in history, not in the topic retest cycle. |
+| D17 | **Scores from prints**: the agent reads the images of a Notion page linked to a topic, or files in the course materials folder (read-only), with a **local vision model**. Rule: a print with only the right answer = right first time; each print with a wrong answer = one wrong attempt. Score = right first time ÷ total questions × 10, shown together with the total wrong attempts. The agent only **proposes**; nothing is saved until I confirm. |
+| D18 | **Materials folder**: only the course materials folder set in `.env` (`PAINEL_MATERIALS_HOST`), mounted read-only in the container. Nothing else on the PC is read. Images and PDFs now; videos later. |
+| D19 | Editing on the study side: rename checklist tasks, edit topics, mark deadlines/events/labs done. |
+| D20 | Weekly summary card (hours, sets, average score, topics learned this week) and automatic daily backup of `painel.db` in `./data/backups` (keeps the last 14). |
+| D21 | Footer: "© <year> Painel de Estudos", links to GitHub and LinkedIn (set in Settings) and "Site (em breve)" without a link. |
+| D22 | **Later version (V3–V5, not now):** asking and giving commands to the agent by voice, with a maximum recording length; local speech-to-text, no cloud. Supported models and requirements are checked before building. The agent answering in voice comes much later. |
+
+| Phase | Content | Done when |
+|---|---|---|
+| F8 | D13–D21 | A retest stays in Histórico after F5 (page reload); a lab is marked done; a print-based score is proposed and confirmed |
+
+### 15. Version 1.4 (12/11/2026)
+| # | Decision |
+|---|---|
+| D23 | **14-day strip** as approved: two rows of 7 days, counts per type in each day (exam, deadline/lab/activity/mock, calendar event), click a day to see its list with times; done items struck through. |
+| D24 | **Timer sessions**: from the first Iniciar to Finalizar (or Zerar) is one session. It counts pauses, sums the studied chunks and keeps a hidden clock from start to end (pauses included). "Finalizar" closes the session; every session is saved and listed on the Painel and in Desempenho. |
+| D25 | **Desempenho** page (Study mode): hours per day, test scores over time with the 70% line, accuracy, streak, per-subject numbers (hours, tests, average, topics learned, open mistakes), timer focus (studied ÷ total) and pauses, scores of exams/labs/mocks. Period 7/30/90 days. The agent reads a short summary of these numbers (local model only); authorized by me on 12/11/2026, on by default and can be turned off in Settings. |
+| D26 | **Mocks** ("simulados" of the college): own deadline kind `mock`; each current subject has 2 (10 questions, up to 1.0 point each). Labs, activities and mocks can link their **own Notion page**, used to read the prints. |
+| D27 | Footer links in the official brand colors. |
+
+| Phase | Content | Done when |
+|---|---|---|
+| F9 | D23–D27 | A timer session with 2 pauses is finished and listed with studied time, total time and pauses; the lab's own Notion page is read |
+
+### 16. Version 1.5 (12/11/2026)
+| # | Decision |
+|---|---|
+| D28 | **Mistake cycle**: every mistake has a status: not reviewed → reviewed ("Já revisei") → in a redo, right = fixed, wrong = review again. A redo copy points to the original question and updates the original mistake; it never creates a new one. "Refazer erros não corrigidos" builds a set (up to 10, no model) from the mistakes not yet fixed, by topic, subject or all. Histórico, Desempenho and the agent summary show mistakes per status. Existing data was converted (redo copies merged into the original mistake). |
+| D29 | **Topic status, rule "a"** (decided by me on 12/11/2026): the 7-day retest decides "learned"; a 21-day retest below 70% sends the topic back to "review" (+ 3-day retest). Redo, focus tests and mock exams don't change the status. |
+| D30 | **Predicted grade** per subject on the Painel, from the grading rule (data): exam part = best exam score, Progresso Acadêmico = sum of the mocks (a mock without score counts 0 for now); shows the total or how much is needed in the AV/AVS to pass. Mock result is in points (right ÷ questions × 1.0); the exam score is capped by the rule (e.g. AV/AVS 0–8). The lab done flag in Provas e prazos decides "lab pending". |
+| D31 | **Interactive charts** in Desempenho (hover/focus reads the value, click a day bar for that day's timer stretches and tests, click a score to open the test, subject filter); **confirmation** before marking an item done in Provas e prazos; "Mandar provas para a agenda" lists the exams and sends only the ticked ones; **agent chat saved** (survives reload, "Limpar conversa" with confirmation); the timer links a pause in the first second to its session. |
+
+| Phase | Content | Done when |
+|---|---|---|
+| F10 | D28–D31 | A redo with 2 wrong answers leaves 2 "review again" and the rest "fixed" with no new mistakes; a chat message is still there after F5; clicking a score in Desempenho opens that test |
+
+### 17. Version 1.6 (12/11/2026): cards from my weak points
+Approved by me on 12/11/2026, with all of Claude's recommendations.
+
+| # | Decision |
+|---|---|
+| D32 | **Cards from my weak points.** Chosen by weight: mistakes "review again" > "not reviewed" > topics in "Revisar" or below 70% in the last test > mistakes "reviewed"; ties go to the subject with the nearest exam. Card types: **concept** (front "what is X?", back 1–2 lines), **question turned card** (from a mistake: the question without options, back = right answer and why, plus what I picked), **mix-up** ("X vs Y", for mistakes where I picked a close option). Every card shows where to review: topic, Notion page, video minute when there is one. No two cards from the same mistake. |
+| D33 | **Two ways to answer.** **Virar** (flip): I recall, flip, mark "Sabia" or "Não sabia". **Responder** (answer): 4 alternatives; the wrong ones come from mistakes I really made when they exist. Effect on the mistake cycle (D28) for cards that came from a mistake: "Não sabia" or wrong answer → "review again"; "Sabia" → "reviewed" (if it was "not reviewed"); right answer in Responder → "fixed". A card I keep getting right moves from Responder to Virar (recall is harder). |
+| D34 | **Generation.** "Gerar cards" by topic, by subject or "my weak points"; 10 cards per generation by default. Sources in C1: my mistakes with their explanations, the topic text (`topic.source_text`) and the topic summary (now saved). New versioned prompt `generate_cards.v1`, through the single LLM client (Pydantic, 1 retry, `llm_call` log). Local model only. |
+| D35 | **Repetition.** Each card has its own schedule, reusing the panel's intervals: new card → 1 day; "Sabia"/right → next step (1 → 7 → 21 → 60 days); "Não sabia"/wrong → back to 1 day. Due cards show in "Montar o dia" and "Próxima ação". |
+| D36 | **Prints and videos as sources.** Authorized by me on 12/11/2026: prints of my answers (labs, mocks, exams, activities, from linked Notion pages or the materials folder) may be read by the **local model only** to transcribe the question and the right answer and turn them into cards (new prompt `read_print_card.v1`). Videos only after the voice phases (V3–V5), local only. My scores never go to the model as card material. |
+| D37 | **Where it shows.** New **Cards** page in Study mode (generate, one row per topic with total and due today) and a **Cards** button in the agent panel (review one at a time). **Quick round** (minigame): about 10 cards in a row from my weak points, optional time per card, streak counter, short result at the end; no points or ranking. **Card of the day**: one card on the Painel and in "Montar o dia", from the weakest point of the subject with the nearest exam. Histórico shows cards per topic; Desempenho can show cards reviewed per day. **Notion export optional** (append only, never delete). |
+
+Data: new tables `card` (front, back, type, mode, topic, source: mistake/text/print/video, source id, options, correct index, step, next review, prompt version, created at) and `card_review` (card, date, mode, knew/right yes/no). New migration; the daily backup covers it.
+
+| Phase | Content | Done when |
+|---|---|---|
+| C1 | D32, D33, D34; review in the agent panel and the Cards page | "Gerar cards dos meus pontos fracos" creates 10 cards from my mistakes and topic text; I answer one in Virar and one in Responder, and the mistake it came from changes status as D33 says |
+| C2 | D36 prints | A lab with a wrong print generates a card with that question and its right answer |
+| C3 | D35, quick round, card of the day, optional Notion export | A card marked "Não sabia" is due again the next day; a quick round of 10 ends with the result; the card of the day shows on the Painel |
+| C4 | D36 videos (after the voice phases) | A card cites a video passage transcribed locally |
+
+---
 
 ---
 
@@ -186,7 +253,7 @@ Graduação → Semestre → Disciplina → Tema. Cobre a graduação atual (ex.
 
 Regra de avaliação é dado, não código. Regras de exemplo, tiradas de planos de ensino reais de 2026 (aprovação com 6+):
 - Padrão: AV/AVS 0–8 + Progresso Acadêmico 0–2.
-- Padrões de Projetos com Java: AV/AVS 0–10, presencial, 75% de frequência.
+- Padrões de Projeto: AV/AVS 0–10, presencial, 75% de frequência.
 - Arquitetura de Sistemas: AV/AVS 0–10 + AP 0–2; a AP só soma se a AV/AVS for 4 ou mais.
 - Extensionistas: regra própria (atividade de extensão de 2 pontos + simulados).
 - Disciplinas com laboratório: a prova só é liberada depois do laboratório.
@@ -264,6 +331,7 @@ A verificar na fase 0: o container chegar ao Ollama do Windows sem expor o Ollam
 - A integração do Notion só vê as páginas que eu compartilho com ela.
 - Agenda: nunca apagar; só editar eventos com `painel=1`.
 - Cópia pública do portfólio: só dados mock, sem notas, sem dados reais do Notion ou da Agenda.
+- Prints das minhas respostas vão só para o modelo local (D17), e só de páginas do Notion ligadas ou da pasta de materiais (D18).
 
 ### 11. Pendências
 Pedidos ao chat da faculdade (prints do portal):
@@ -290,3 +358,67 @@ A construção começa depois de 08/12/2026.
 ### 13. Carga inicial (F1)
 
 Esta cópia pública vem com **dados fictícios** (`backend/app/seed.py`): uma graduação de exemplo, cinco disciplinas atuais com provas, progresso do portal, disciplinas pendentes e um registro inicial de ACC. Os dados reais ficam só na cópia privada do dono.
+
+### 14. Versão 1.3 (12/11/2026, depois do primeiro uso real)
+| # | Decisão |
+|---|---|
+| D13 | O modo Estudo ganha três páginas: **Painel**, **Provas e prazos** e **Histórico**. |
+| D14 | **Provas e prazos** (lado Estudo): provas, prazos, eventos, laboratórios e atividades numa lista só; cada um pode ser editado e marcado como concluído. Laboratórios e atividades são prazos do tipo `lab` / `activity`. |
+| D15 | **Histórico**: todo conjunto de questões fica salvo e visível (data, tipo, tema, nota), evolução por tema e três ações: refazer as questões erradas (sem chamar o modelo), novo teste com base nos meus erros, novo teste com base nos meus acertos. |
+| D16 | **Simulado da prova**: um conjunto que mistura os temas de uma disciplina, do tamanho da prova real (configurações: 10 questões, 60 minutos), com contagem regressiva. Conta no histórico, não no ciclo de retestes do tema. |
+| D17 | **Notas pelos prints**: o agente lê as imagens de uma página do Notion ligada a um tema, ou arquivos da pasta de materiais do curso (só leitura), com um **modelo local que lê imagens**. Regra: print só da resposta certa = acerto de primeira; cada print com resposta errada = uma tentativa errada. Nota = acertos de primeira ÷ total de questões × 10, mostrada junto com o total de tentativas erradas. O agente só **propõe**; nada é salvo antes de eu confirmar. |
+| D18 | **Pasta de materiais**: só a pasta de materiais do curso definida no `.env` (`PAINEL_MATERIALS_HOST`), montada só para leitura no container. Nada mais do PC é lido. Imagens e PDFs agora; vídeos depois. |
+| D19 | Edição no lado Estudo: renomear tarefas do checklist, editar temas, marcar prazos/eventos/labs como concluídos. |
+| D20 | Card de resumo da semana (horas, conjuntos, nota média, temas aprendidos na semana) e backup automático diário do `painel.db` em `./data/backups` (guarda os últimos 14). |
+| D21 | Rodapé: "© <ano> Painel de Estudos", links para GitHub e LinkedIn (definidos em Configurações) e "Site (em breve)" sem link. |
+| D22 | **Versão futura (V3 a V5, não agora):** perguntar e dar comandos ao agente por voz, com limite de duração do áudio; voz para texto local, sem nuvem. Antes de construir, conferir os modelos suportados e o que é preciso. O agente responder em voz fica bem para depois. |
+
+| Fase | Conteúdo | Pronto quando |
+|---|---|---|
+| F8 | D13–D21 | Um reteste continua no Histórico depois do F5 (recarregar a página); um lab é marcado como concluído; uma nota pelos prints é proposta e confirmada |
+
+### 15. Versão 1.4 (12/11/2026)
+| # | Decisão |
+|---|---|
+| D23 | **Faixa de 14 dias** como aprovada: duas linhas de 7 dias, contagens por tipo em cada dia (prova, prazo/lab/atividade/simulado, evento da agenda), clique no dia abre a lista com horários; itens feitos riscados. |
+| D24 | **Sessões do cronômetro**: do primeiro Iniciar até Finalizar (ou Zerar) é uma sessão. Conta as pausas, soma os trechos estudados e guarda um relógio oculto do início ao fim (com as pausas). "Finalizar" fecha a sessão; toda sessão fica salva e aparece no Painel e em Desempenho. |
+| D25 | Página **Desempenho** (modo Estudo): horas por dia, notas dos testes no tempo com a linha dos 70%, acerto, sequência de dias, números por disciplina (horas, testes, média, temas aprendidos, erros em aberto), foco no cronômetro (estudado ÷ total) e pausas, notas de provas/labs/simulados. Período de 7/30/90 dias. O agente lê um resumo desses números (só modelo local); autorizado por mim em 12/11/2026, ligado por padrão e dá para desligar em Configurações. |
+| D26 | **Simulados** da faculdade: tipo próprio de prazo, `mock`; cada disciplina atual tem 2 (10 questões, até 1,0 ponto cada). Labs, atividades e simulados podem ligar a **própria página do Notion**, usada para ler os prints. |
+| D27 | Links do rodapé nas cores oficiais das marcas. |
+
+| Fase | Conteúdo | Pronto quando |
+|---|---|---|
+| F9 | D23–D27 | Uma sessão do cronômetro com 2 pausas é finalizada e aparece com tempo estudado, tempo total e pausas; a página própria do lab no Notion é lida |
+
+### 16. Versão 1.5 (12/11/2026)
+| # | Decisão |
+|---|---|
+| D28 | **Ciclo dos erros**: todo erro tem um status: não revisado → revisado ("Já revisei") → num refazer, acertou = corrigido, errou = revisar de novo. A cópia do refazer aponta para a questão original e atualiza o erro original; nunca cria erro novo. "Refazer erros não corrigidos" monta um conjunto (até 10, sem modelo) com os erros ainda não corrigidos, por tema, disciplina ou todos. Histórico, Desempenho e o resumo do agente mostram os erros por status. Os dados existentes foram convertidos (cópias do refazer juntadas ao erro original). |
+| D29 | **Status do tema, regra "a"** (decidida por mim em 12/11/2026): o reteste de 7 dias decide o "aprendido"; um reteste de 21 dias abaixo de 70% manda o tema de volta para "revisar" (+ reteste em 3 dias). Refazer, testes de foco e simulados não mudam o status. |
+| D30 | **Nota prevista** por disciplina no Painel, pela regra de avaliação (dado): parte da prova = melhor nota de prova, Progresso Acadêmico = soma dos simulados (simulado sem nota conta 0 por enquanto); mostra o total ou quanto falta na AV/AVS para passar. O resultado do simulado é em pontos (certas ÷ questões × 1,0); a nota da prova tem o teto da regra (ex.: AV/AVS de 0 a 8). O "feito" do laboratório em Provas e prazos decide o "lab pendente". |
+| D31 | **Gráficos interativos** no Desempenho (passar o mouse/focar lê o valor, clicar na barra do dia mostra os trechos do cronômetro e os testes do dia, clicar numa nota abre o teste, filtro por disciplina); **confirmação** antes de marcar um item como feito em Provas e prazos; "Mandar provas para a agenda" lista as provas e manda só as marcadas; **conversa com o agente salva** (sobrevive ao recarregar, "Limpar conversa" com confirmação); o cronômetro liga à sessão uma pausa feita no primeiro segundo. |
+
+| Fase | Conteúdo | Pronto quando |
+|---|---|---|
+| F10 | D28–D31 | Um refazer com 2 erradas deixa 2 "revisar de novo" e o resto "corrigido", sem erro novo; uma mensagem da conversa continua lá depois do F5; clicar numa nota no Desempenho abre aquele teste |
+
+### 17. Versão 1.6 (12/11/2026): cards a partir dos meus pontos fracos
+Aprovada por mim em 12/11/2026, com todas as recomendações do Claude.
+
+| # | Decisão |
+|---|---|
+| D32 | **Cards dos meus pontos fracos.** Escolhidos por peso: erros "revisar de novo" > "não revisado" > temas em "Revisar" ou abaixo de 70% no último teste > erros "revisado"; empate vai para a disciplina com a prova mais próxima. Tipos: **conceito** (frente "o que é X?", verso em 1–2 linhas), **questão virada card** (de um erro: a pergunta sem as alternativas, verso = resposta certa e o porquê, mais o que eu marquei), **confusão** ("X vs Y", para erros em que marquei uma opção parecida). Todo card mostra onde rever: tema, página do Notion e o minuto do vídeo quando houver. Nunca dois cards do mesmo erro. |
+| D33 | **Dois jeitos de responder.** **Virar:** lembro, viro e marco "Sabia" ou "Não sabia". **Responder:** 4 alternativas; as erradas vêm de erros que eu realmente cometi, quando existirem. Efeito no ciclo dos erros (D28) para cards que vieram de um erro: "Não sabia" ou resposta errada → "revisar de novo"; "Sabia" → "revisado" (se estava "não revisado"); acerto no Responder → "corrigido". Um card que eu sempre acerto passa do Responder para o Virar (lembrar é mais difícil). |
+| D34 | **Geração.** "Gerar cards" por tema, por disciplina ou "meus pontos fracos"; 10 cards por geração por padrão. Fontes na C1: meus erros com as explicações, o texto do tema (`topic.source_text`) e o resumo do tema (que passa a ficar salvo). Prompt novo versionado `generate_cards.v1`, pelo cliente único de LLM (Pydantic, 1 nova tentativa, registro em `llm_call`). Só modelo local. |
+| D35 | **Repetição.** Cada card tem o próprio calendário, com os intervalos do painel: card novo → 1 dia; "Sabia"/acerto → próximo passo (1 → 7 → 21 → 60 dias); "Não sabia"/erro → volta para 1 dia. Cards vencidos aparecem no "Montar o dia" e na "Próxima ação". |
+| D36 | **Prints e vídeos como fonte.** Autorizado por mim em 12/11/2026: os prints das minhas respostas (labs, simulados, provas, atividades, de páginas do Notion ligadas ou da pasta de materiais) podem ser lidos **só pelo modelo local** para transcrever a questão e a resposta certa e transformar em cards (prompt novo `read_print_card.v1`). Vídeos só depois das fases de voz (V3 a V5), só local. Minhas notas nunca vão ao modelo como material de card. |
+| D37 | **Onde aparece.** Página nova **Cards** no modo Estudo (gerar, uma linha por tema com total e vencidos hoje) e botão **Cards** no painel do agente (revisar um por vez). **Rodada rápida** (minigame): uns 10 cards em sequência dos meus pontos fracos, tempo por card opcional, contador de acertos seguidos, resultado curto no fim; sem pontos nem ranking. **Card do dia:** um card no Painel e no "Montar o dia", do ponto mais fraco da disciplina com a prova mais próxima. O Histórico mostra os cards por tema; o Desempenho pode mostrar cards revisados por dia. **Exportar para o Notion é opcional** (só acrescentar, nunca apagar). |
+
+Dados: tabelas novas `card` (frente, verso, tipo, modo, tema, origem: erro/texto/print/vídeo, id da origem, alternativas, índice da certa, passo, próxima revisão, versão do prompt, criado em) e `card_review` (card, data, modo, sabia/acertou sim/não). Migração nova; o backup diário cobre.
+
+| Fase | Conteúdo | Pronto quando |
+|---|---|---|
+| C1 | D32, D33, D34; revisão no painel do agente e página Cards | "Gerar cards dos meus pontos fracos" cria 10 cards dos meus erros e do texto do tema; respondo um no Virar e um no Responder, e o erro de origem muda de status como diz a D33 |
+| C2 | D36 prints | Um lab com print errado gera um card com aquela questão e a resposta certa |
+| C3 | D35, rodada rápida, card do dia, exportar para o Notion (opcional) | Um card marcado "Não sabia" vence de novo no dia seguinte; uma rodada rápida de 10 termina com o resultado; o card do dia aparece no Painel |
+| C4 | D36 vídeos (depois das fases de voz) | Um card cita um trecho de vídeo transcrito localmente |

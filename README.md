@@ -4,7 +4,7 @@ Faço uma graduação EAD, e estudar um único tema me tomava de 3 a 6 horas: ab
 
 Então decidi construir a ferramenta que eu precisava: um painel que roda no meu próprio PC, com um agente de estudos que transforma o conteúdo de cada tema em resumo e questões no estilo da prova, corrige as minhas respostas e agenda as revisões. A medida de sucesso que defini não é quantas horas eu estudei, e sim se eu aprendi: um tema só conta como **aprendido** quando eu acerto 70% ou mais na revisão de 7 dias.
 
-> Esta é a **versão pública v1**, com **dados fictícios** (curso, disciplinas, provas e notas inventados). A versão que eu uso no dia a dia fica privada, com os meus dados reais. Esta cópia só é atualizada depois de bastante uso e de uma próxima versão do painel.
+> Esta é a **versão pública v1.7**, com **dados fictícios** (curso, disciplinas, provas, notas e atividade de estudo inventados). A versão que eu uso no dia a dia fica privada, com os meus dados reais. Esta cópia é atualizada depois de um bom tempo de uso de cada nova versão.
 
 ![Painel no tema claro](docs/prints/painel-claro.png)
 
@@ -17,10 +17,13 @@ Então decidi construir a ferramenta que eu precisava: um painel que roda no meu
 
 ## O que ele faz
 
-- **Painel do dia:** próxima prova com contagem regressiva, horas estudadas na semana, a próxima ação sugerida (prova mais perto × menor progresso × revisões pendentes) e o progresso de cada disciplina.
-- **Cronômetro de estudo:** meta e alarme por tema, com som; cada pausa salva o trecho estudado.
-- **Agente de estudos:** a partir do texto do tema, gera resumo e questões no formato da prova, corrige, mostra o percentual de acerto e guarda os erros para revisar depois.
-- **Checklist do dia:** temas planejados e revisões que vencem hoje.
+- **Painel do dia:** próxima prova com contagem regressiva, horas estudadas na semana, a próxima ação sugerida (prova mais perto × menor progresso × revisões pendentes), o card do dia, a faixa dos próximos 14 dias e o progresso de cada disciplina com a **nota prevista** (o que já tenho e quanto falta na prova para passar).
+- **Cronômetro de estudo:** meta e alarme por tema, com som. Cada sessão guarda o tempo estudado, o tempo total e quantas pausas eu fiz.
+- **Burro bot, o agente de estudos:** a partir do texto do tema, gera resumo e questões no formato da prova, corrige, mostra o percentual de acerto e guarda os erros para revisar depois. Também conversa sobre o tema (a conversa fica salva) e monta o checklist do dia.
+- **Ciclo dos erros:** cada erro passa por não revisado → revisado → corrigido (ou revisar de novo). Dá para refazer só as erradas, pedir um teste novo com base nos erros e fazer um simulado da prova com tempo.
+- **Cards de estudo:** feitos a partir do que eu mais erro, dos prints das minhas respostas e de transcrições de vídeo. Respondo com 4 alternativas ou viro o card; cada card volta em 1, 7, 21 e 60 dias. Tem rodada rápida e card do dia.
+- **Histórico e Desempenho:** todo teste fica salvo; gráficos interativos de horas por dia e notas ao longo do tempo, por período e por disciplina.
+- **Provas e prazos:** provas, labs, atividades e simulados numa lista só, com o resultado lido dos prints das minhas respostas (o modelo só propõe; eu confirmo).
 - **Progresso do curso:** horas por componente (mínima, extensionistas, atividades complementares, optativa, estágio).
 - **Regras de avaliação como dados:** cada disciplina tem a sua regra (pesos, nota mínima), sem `if` por disciplina no código.
 - **Integrações opcionais:**
@@ -35,6 +38,14 @@ Então decidi construir a ferramenta que eu precisava: um painel que roda no meu
 ### Agente de questões
 
 ![Agente gerando e corrigindo questões](docs/prints/agente-questoes.png)
+
+### Histórico, desempenho e cards
+
+| Histórico | Desempenho |
+| --- | --- |
+| ![Histórico com a evolução por tema](docs/prints/historico.png) | ![Gráficos de horas e notas](docs/prints/desempenho.png) |
+
+![Cards de estudo revisados no painel do agente](docs/prints/cards.png)
 
 ### Progresso do curso e configurações
 
@@ -66,12 +77,12 @@ Eu escrevi o [`SPEC.md`](SPEC.md) com o problema, as decisões e as fases (F0 a 
 
 ### Segurança e privacidade
 
-Antes de publicar esta versão, fiz uma auditoria de segurança com um roteiro próprio e um checklist de pré-publicação. O relatório está em [`docs/security-audit/`](docs/security-audit/).
+Antes de publicar cada versão, faço uma auditoria de segurança com um roteiro próprio e um checklist de pré-publicação. Os relatórios estão em [`docs/security-audit/`](docs/security-audit/). Todo pull request roda os testes no GitHub Actions (ruff e pytest no backend; TypeScript, vitest e build no frontend).
 
 - Porta presa a `127.0.0.1`: só o próprio PC acessa.
 - Proteção contra DNS rebinding, bloqueio de escrita vinda de outros sites, CSP restrita e cabeçalhos de segurança.
 - Container rodando sem root.
-- Ao modelo vai só o texto do tema e as questões; notas, nomes e agenda nunca são enviados.
+- Ao modelo vai o texto do tema e as questões. Os prints das minhas respostas e um resumo curto dos meus números de estudo só vão para o modelo **local**, e o resumo dá para desligar em Configurações. Nada vai para IA na nuvem.
 - Tokens só no `.env` e em `./secrets/`, os dois fora do git.
 
 ## Rodar
@@ -111,7 +122,12 @@ npm run dev   # encaminha /api para a porta 8000
 - `backend/tests/` — testes (pytest)
 - `frontend/` — interface React
 - `eval/` — teste de modelos locais (F0)
-- `docs/` — guia, prints, resultado da F0 e auditoria de segurança
+- `docs/` — guia, prints, resultado da F0 e auditorias de segurança
+- `.github/workflows/ci.yml` — testes em todo pull request
+
+## Créditos das imagens
+
+O burro do Burro bot é o emoji animado do Noto, do Google (licença CC BY 4.0). Detalhes em [`frontend/public/CREDITOS-IMAGENS.md`](frontend/public/CREDITOS-IMAGENS.md).
 
 ## Autor
 

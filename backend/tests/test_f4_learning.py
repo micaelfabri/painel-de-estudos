@@ -114,7 +114,8 @@ def test_topic_scores_and_mistakes_review(fake):
 
     mistakes = client.get("/api/learning/mistakes").json()
     assert len(mistakes) == 4 and mistakes[0]["chosen_index"] == 1 and mistakes[0]["correct_index"] == 0
-    m = client.get(f"/api/mistakes/{mistakes[0]['id']}").json()
-    m["reviewed"] = True
-    client.put(f"/api/mistakes/{m['id']}", json=m)
-    assert len(client.get("/api/learning/mistakes").json()) == 3
+    # v1.5 (D28): "revisado" continua na lista (falta acertar); só some quando for corrigido
+    r = client.patch(f"/api/learning/mistakes/{mistakes[0]['id']}", json={"status": "reviewed"})
+    assert r.json()["status"] == "reviewed"
+    assert len(client.get("/api/learning/mistakes").json()) == 4
+    assert len(client.get("/api/learning/mistakes?status=open").json()) == 3

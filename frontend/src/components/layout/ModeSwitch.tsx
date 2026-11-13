@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { focusRing } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-export type Mode = "study" | "manage";
+type Mode = "study" | "manage";
 
 export function modeFromPath(pathname: string): Mode {
   return pathname.startsWith("/gerenciar") ? "manage" : "study";

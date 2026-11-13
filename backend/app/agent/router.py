@@ -5,14 +5,14 @@ from datetime import datetime
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import learning, models, settings_store
-from ..integrations import notion
 from ..db import get_session
+from ..integrations import notion
 from . import prompts
 from .client import LLMClient, LLMError
 
@@ -131,12 +131,27 @@ def _question_out(q: models.Question) -> dict:
     }
 
 
-def _set_out(qs: models.QuestionSet, topic: models.Topic) -> dict:
+def set_title(qs: models.QuestionSet, topic: models.Topic | None, subject: models.Subject | None) -> str:
+    """Título do conjunto: o tema; sem tema, simulado ou "erros" (refazer de vários temas)."""
+    if topic:
+        return topic.title
+    base = "Erros para refazer" if qs.attempt_type == "redo" else "Simulado"
+    return f"{base} · {subject.name}" if subject else base
+
+
+def _set_out(qs: models.QuestionSet, topic: models.Topic | None, session: Session | None = None) -> dict:
+    subject_id = topic.subject_id if topic else qs.subject_id
+    subject = session.get(models.Subject, subject_id) if session and subject_id else None
     return {
         "id": qs.id,
         "topic_id": qs.topic_id,
-        "topic_title": topic.title,
-        "subject_id": topic.subject_id,
+        "topic_title": set_title(qs, topic, subject),
+        "subject_id": subject_id,
+        "time_limit_minutes": qs.time_limit_minutes,
+        # Tempo que falta no simulado; created_at é hora local desde a v1.7
+        "seconds_left": (max(0, int(qs.time_limit_minutes * 60 - (datetime.now() - qs.created_at).total_seconds()))
+                         if qs.time_limit_minutes and qs.created_at and qs.completed_at is None else None),
+        "label": learning.LABELS.get(qs.attempt_type, qs.attempt_type),
         "attempt_type": qs.attempt_type,
         "model": qs.model,
         "prompt_version": qs.prompt_version,
@@ -203,7 +218,7 @@ def generate_question_set(data: GenerateIn, request: Request, session: Session =
                                     options=options, correct_index=correct,
                                     explanation=q.explanation.strip() or None))
     session.commit()
-    return _set_out(_load_set(session, qs.id), topic)
+    return _set_out(_load_set(session, qs.id), topic, session)
 
 
 @router.get("/question-sets")
@@ -219,7 +234,7 @@ def list_question_sets(topic_id: int | None = None, session: Session = Depends(g
 @router.get("/question-sets/{set_id}")
 def get_question_set(set_id: int, session: Session = Depends(get_session)):
     qs = _load_set(session, set_id)
-    return _set_out(qs, session.get(models.Topic, qs.topic_id))
+    return _set_out(qs, session.get(models.Topic, qs.topic_id) if qs.topic_id else None, session)
 
 
 def _recompute_score(session: Session, qs: models.QuestionSet) -> None:
@@ -250,8 +265,12 @@ def answer_question(question_id: int, data: AnswerIn, request: Request, session:
     q.answer = models.Answer(chosen_index=data.chosen_index, is_correct=correct)
     qs = q.question_set
     mistake = None
-    if not correct:
-        mistake = models.Mistake(question_id=q.id, topic_id=qs.topic_id)
+    topic_id = q.topic_id or qs.topic_id
+    if q.source_question_id is not None:
+        # D28: cópia do refazer → atualiza o erro da questão original (corrigido ou revisar de novo)
+        learning.record_retry(session, q, correct, topic_id)
+    elif not correct and topic_id is not None:
+        mistake = models.Mistake(question_id=q.id, topic_id=topic_id)
         session.add(mistake)
     session.flush()
     _recompute_score(session, qs)
@@ -279,6 +298,221 @@ def flag_question(question_id: int, session: Session = Depends(get_session)):
     return {"flagged_bad": True, "set_score": qs.score}
 
 
+# --- v1.3: histórico, refazer erradas, testes de foco e simulado (D15, D16) ---
+
+
+def _rng(request: Request) -> random.Random | None:
+    # Testes desligam o embaralhamento para saber onde está a certa
+    return random.Random() if getattr(request.app.state, "shuffle_options", True) else None
+
+
+def _save_set(session: Session, request: Request, *, topic_id: int | None, subject_id: int | None,
+              attempt_type: str, model: str, prompt_version: str, summary: str | None,
+              questions: list[tuple[GeneratedQuestion, int | None]], source_set_id: int | None = None,
+              time_limit_minutes: int | None = None,
+              source_question_ids: list[int | None] | None = None) -> models.QuestionSet:
+    qs = models.QuestionSet(topic_id=topic_id, subject_id=subject_id, attempt_type=attempt_type, model=model,
+                            prompt_version=prompt_version, summary=summary, source_set_id=source_set_id,
+                            time_limit_minutes=time_limit_minutes)
+    session.add(qs)
+    session.flush()
+    rng = _rng(request)
+    for i, (q, q_topic) in enumerate(questions, start=1):
+        options, correct = shuffle_options(q, rng) if rng else ([o.strip() for o in q.options], q.correct_index)
+        session.add(models.Question(question_set_id=qs.id, topic_id=q_topic, position=i,
+                                    statement=q.statement.strip(), options=options, correct_index=correct,
+                                    explanation=(q.explanation or "").strip() or None,
+                                    source_question_id=source_question_ids[i - 1] if source_question_ids else None))
+    session.commit()
+    return _load_set(session, qs.id)
+
+
+@router.post("/question-sets/{set_id}/redo", status_code=201)
+def redo_wrong(set_id: int, request: Request, session: Session = Depends(get_session)):
+    """Novo conjunto só com as questões erradas (ou não respondidas no tempo) de um conjunto. Sem modelo."""
+    src = _load_set(session, set_id)
+    wrong = [q for q in src.questions if not q.flagged_bad and q.answer is not None and not q.answer.is_correct]
+    if not wrong:
+        raise HTTPException(409, "Este conjunto não tem questões erradas para refazer.")
+    copies = [_copy(q, q.topic_id or src.topic_id) for q in wrong]
+    qs = _save_set(session, request, topic_id=src.topic_id, subject_id=src.subject_id, attempt_type="redo",
+                   model="(sem modelo)", prompt_version="redo", summary=None, questions=copies,
+                   source_set_id=src.id, source_question_ids=[q.source_question_id or q.id for q in wrong])
+    return _set_out(qs, session.get(models.Topic, qs.topic_id) if qs.topic_id else None, session)
+
+
+def _copy(q: models.Question, topic_id: int | None) -> tuple[GeneratedQuestion, int | None]:
+    return (GeneratedQuestion(statement=q.statement, options=list(q.options), correct_index=q.correct_index,
+                              explanation=q.explanation or ""), topic_id)
+
+
+class MistakesRedoIn(BaseModel):
+    subject_id: int | None = None
+    topic_id: int | None = None
+    # Padrão: tudo que não foi corrigido (não revisados, revisados e para revisar de novo)
+    statuses: list[Literal["open", "reviewed", "again"]] = Field(default_factory=lambda: ["open", "reviewed", "again"])
+    limit: int = Field(default=10, ge=1, le=50)
+
+
+@router.post("/mistakes/redo", status_code=201)
+def redo_mistakes(data: MistakesRedoIn, request: Request, session: Session = Depends(get_session)):
+    """D28: novo conjunto com os erros ainda não corrigidos (de um tema, de uma disciplina ou de tudo). Sem modelo."""
+    stmt = (select(models.Mistake).join(models.Topic, models.Topic.id == models.Mistake.topic_id)
+            .where(models.Mistake.status.in_(data.statuses))
+            .order_by(models.Mistake.updated_at, models.Mistake.id))
+    if data.topic_id is not None:
+        stmt = stmt.where(models.Mistake.topic_id == data.topic_id)
+    if data.subject_id is not None:
+        stmt = stmt.where(models.Topic.subject_id == data.subject_id)
+    mistakes = session.scalars(stmt.limit(data.limit)).all()
+    questions = [(m, session.get(models.Question, m.question_id)) for m in mistakes]
+    questions = [(m, q) for m, q in questions if q is not None and not q.flagged_bad]
+    if not questions:
+        raise HTTPException(409, "Nenhum erro para refazer aqui.")
+    topic_ids = {m.topic_id for m, _ in questions}
+    subject_ids = {session.get(models.Topic, t).subject_id for t in topic_ids}
+    qs = _save_set(session, request, topic_id=next(iter(topic_ids)) if len(topic_ids) == 1 else None,
+                   subject_id=next(iter(subject_ids)) if len(subject_ids) == 1 else None, attempt_type="redo",
+                   model="(sem modelo)", prompt_version="redo", summary=None,
+                   questions=[_copy(q, m.topic_id) for m, q in questions],
+                   source_question_ids=[q.id for _, q in questions])
+    return _set_out(qs, session.get(models.Topic, qs.topic_id) if qs.topic_id else None, session)
+
+
+@router.post("/question-sets/{set_id}/finish")
+def finish_set(set_id: int, session: Session = Depends(get_session)):
+    """Fecha o conjunto (tempo do simulado acabou ou desisti): as não respondidas contam como erradas."""
+    qs = _load_set(session, set_id)
+    if qs.completed_at is not None:
+        return _set_out(qs, session.get(models.Topic, qs.topic_id) if qs.topic_id else None, session)
+    for q in qs.questions:
+        if q.answer is None and not q.flagged_bad:
+            q.answer = models.Answer(chosen_index=-1, is_correct=False)
+            topic_id = q.topic_id or qs.topic_id
+            if q.source_question_id is not None:
+                learning.record_retry(session, q, False, topic_id)
+            elif topic_id is not None:
+                session.add(models.Mistake(question_id=q.id, topic_id=topic_id))
+    session.flush()
+    _recompute_score(session, qs)
+    session.commit()
+    return _set_out(_load_set(session, set_id), session.get(models.Topic, qs.topic_id) if qs.topic_id else None,
+                    session)
+
+
+class FocusIn(BaseModel):
+    topic_id: int
+    focus: Literal["errors", "hits"]
+    model: str | None = None
+    n_options: int = Field(ge=2, le=6)
+
+
+FOCUS_RULE = {
+    "errors": "As questões de referência são as que o aluno ERROU. Faça questões novas que treinem exatamente "
+              "esses pontos, para ele fixar o que ainda não sabe.",
+    "hits": "As questões de referência são as que o aluno ACERTOU. Faça questões novas, um pouco mais difíceis, "
+            "sobre esses mesmos pontos, para confirmar que ele sabe de verdade e não só decorou.",
+}
+
+
+@router.post("/question-sets/focus", status_code=201)
+def generate_focused(data: FocusIn, request: Request, session: Session = Depends(get_session),
+                     client: LLMClient = Depends(get_client)):
+    topic = session.get(models.Topic, data.topic_id)
+    if topic is None:
+        raise HTTPException(404, "tema não encontrado")
+    if not topic.source_text:
+        raise HTTPException(422, {"message": "Este tema ainda não tem texto salvo. Gere um teste normal antes.",
+                                  "status": "no_text"})
+    rows = session.execute(
+        select(models.Question)
+        .join(models.QuestionSet, models.Question.question_set_id == models.QuestionSet.id)
+        .join(models.Answer, models.Answer.question_id == models.Question.id)
+        .where((models.Question.topic_id == topic.id) |
+               ((models.Question.topic_id.is_(None)) & (models.QuestionSet.topic_id == topic.id)),
+               models.Answer.is_correct.is_(data.focus == "hits"), models.Question.flagged_bad.is_(False))
+        .order_by(models.Question.id.desc()).limit(15)
+    ).scalars().all()
+    if not rows:
+        what = "erros" if data.focus == "errors" else "acertos"
+        raise HTTPException(409, f"Ainda não há {what} neste tema para usar de base.")
+    reference = "\n".join(f"- {q.statement} → certa: {q.options[q.correct_index]}" for q in rows)
+    subject = session.get(models.Subject, topic.subject_id)
+    n_questions = int(settings_store.get(session, "questions_per_set"))
+    prompt = prompts.load("generate_focused")
+    rendered = prompt.render(focus_rule=FOCUS_RULE[data.focus], n_questions=n_questions, n_options=data.n_options,
+                             topic_title=f"{subject.name if subject else ''} · {topic.title}",
+                             text=topic.source_text[:MAX_TEXT], reference=reference)
+    try:
+        result, model_used = client.chat_json(prompt, rendered, set_schema(n_questions, data.n_options), data.model)
+    except LLMError as exc:
+        raise _llm_http_error(exc) from exc
+    qs = _save_set(session, request, topic_id=topic.id, subject_id=topic.subject_id,
+                   attempt_type=f"focus_{data.focus}", model=model_used,
+                   prompt_version=f"{prompt.name}.{prompt.version}", summary=result.summary.strip(),
+                   questions=[(q, topic.id) for q in result.questions[:n_questions]])
+    return _set_out(qs, topic, session)
+
+
+class SimulationIn(BaseModel):
+    subject_id: int
+    model: str | None = None
+    n_options: int = Field(ge=2, le=6)
+
+
+class SimQuestion(GeneratedQuestion):
+    topic_index: int = Field(ge=1)
+
+
+def simulation_schema(n_questions: int, n_options: int) -> type[BaseModel]:
+    class Question(SimQuestion):
+        options: list[str] = Field(min_length=n_options, max_length=n_options)
+
+    class Simulation(BaseModel):
+        summary: str = Field(min_length=3)
+        questions: list[Question] = Field(min_length=n_questions, max_length=n_questions)
+
+    Simulation.__name__ = "GeneratedSimulation"
+    return Simulation
+
+
+@router.post("/simulations", status_code=201)
+def generate_simulation(data: SimulationIn, request: Request, session: Session = Depends(get_session),
+                        client: LLMClient = Depends(get_client)):
+    subject = session.get(models.Subject, data.subject_id)
+    if subject is None:
+        raise HTTPException(404, "disciplina não encontrada")
+    topics = session.scalars(select(models.Topic).where(models.Topic.subject_id == subject.id,
+                                                        models.Topic.source_text.is_not(None))
+                             .order_by(models.Topic.position)).all()
+    topics = [t for t in topics if t.source_text and t.source_text.strip()]
+    if not topics:
+        raise HTTPException(422, {"message": "Nenhum tema desta disciplina tem texto salvo ainda. "
+                                             "Gere pelo menos um teste de tema antes do simulado.",
+                                  "status": "no_text"})
+    # Cada tema leva uma fatia igual do limite de texto, para caber no contexto do modelo
+    share = MAX_TEXT // len(topics)
+    block = "\n\n".join(f"[{i}] {t.title}\n\"\"\"\n{t.source_text[:share]}\n\"\"\"" for i, t in enumerate(topics, 1))
+    n_questions = int(settings_store.get(session, "questions_per_set"))
+    prompt = prompts.load("generate_simulation")
+    rendered = prompt.render(subject_name=subject.name, n_questions=n_questions, n_options=data.n_options,
+                             topics=block)
+    try:
+        result, model_used = client.chat_json(prompt, rendered, simulation_schema(n_questions, data.n_options),
+                                              data.model)
+    except LLMError as exc:
+        raise _llm_http_error(exc) from exc
+    pairs = []
+    for q in result.questions[:n_questions]:
+        idx = q.topic_index if 1 <= q.topic_index <= len(topics) else None
+        pairs.append((q, topics[idx - 1].id if idx else None))
+    qs = _save_set(session, request, topic_id=None, subject_id=subject.id, attempt_type="simulation",
+                   model=model_used, prompt_version=f"{prompt.name}.{prompt.version}",
+                   summary=result.summary.strip(), questions=pairs,
+                   time_limit_minutes=int(settings_store.get(session, "exam_minutes")))
+    return _set_out(qs, None, session)
+
+
 # --- Conversa ----------------------------------------------------------------
 
 
@@ -298,26 +532,71 @@ class ChatIn(BaseModel):
 def chat(data: ChatIn, session: Session = Depends(get_session), client: LLMClient = Depends(get_client)):
     topic = session.get(models.Topic, data.topic_id) if data.topic_id else None
     prompt = prompts.load("chat")
+    # D25: números de estudo só vão ao modelo (local) se eu liberar em Configurações
+    if settings_store.get(session, "agent_reads_metrics"):
+        from .. import study
+
+        metrics = study.metrics_text(session)
+    else:
+        metrics = "(acesso aos números não liberado em Configurações)"
     rendered = prompt.render(topic_title=topic.title if topic else "nenhum",
-                             text=(topic.source_text or "(sem texto)") if topic else "(nenhum tema selecionado)")
-    history = [m.model_dump() for m in data.history] + [{"role": "user", "content": data.message}]
+                             text=(topic.source_text or "(sem texto)") if topic else "(nenhum tema selecionado)",
+                             metrics=metrics)
+    # v1.5: a conversa fica salva; sem histórico enviado pela tela, usa as últimas mensagens salvas
+    past = [m.model_dump() for m in data.history] or [
+        {"role": m.role, "content": m.content} for m in reversed(session.scalars(
+            select(models.ChatMessage).order_by(models.ChatMessage.id.desc()).limit(CHAT_CONTEXT)).all())]
+    history = past + [{"role": "user", "content": data.message}]
     try:
         result, model_used = client.chat_json(prompt, rendered, ChatAnswer, data.model, history)
     except LLMError as exc:
         raise _llm_http_error(exc) from exc
-    return {"answer": result.answer.strip(), "model": model_used}
+    answer = result.answer.strip()
+    session.add_all([
+        models.ChatMessage(role="user", content=data.message, topic_id=data.topic_id),
+        models.ChatMessage(role="assistant", content=answer, topic_id=data.topic_id, model=model_used),
+    ])
+    session.commit()
+    return {"answer": answer, "model": model_used}
+
+
+CHAT_CONTEXT = 10  # mensagens anteriores que vão de contexto ao modelo
+
+
+@router.get("/chat/messages")
+def chat_messages(limit: int = 60, session: Session = Depends(get_session)):
+    rows = session.scalars(select(models.ChatMessage).order_by(models.ChatMessage.id.desc())
+                           .limit(min(max(limit, 1), 500))).all()
+    return [{"id": m.id, "role": m.role, "content": m.content, "created_at": m.created_at.isoformat()
+             if m.created_at else None} for m in reversed(rows)]
+
+
+@router.delete("/chat/messages", status_code=204)
+def clear_chat(session: Session = Depends(get_session)):
+    """Limpar conversa (com confirmação na tela). Só apaga a conversa; testes e notas continuam."""
+    session.query(models.ChatMessage).delete()
+    session.commit()
 
 
 # --- Registro de uso ---------------------------------------------------------
 
 
 @router.get("/usage")
-def usage(session: Session = Depends(get_session)):
-    rows = session.scalars(select(models.LlmCall).order_by(models.LlmCall.id.desc()).limit(200)).all()
-    return [
-        {"id": r.id, "created_at": r.created_at.isoformat() if r.created_at else None, "model": r.model,
-         "prompt": f"{r.prompt_name}.{r.prompt_version}", "input_tokens": r.input_tokens,
-         "output_tokens": r.output_tokens, "latency_ms": r.latency_ms, "attempts": r.attempts,
-         "status": r.status, "error": r.error}
-        for r in rows
-    ]
+def usage(page: int = Query(1, ge=1), per_page: int = Query(10, ge=1, le=100),
+          session: Session = Depends(get_session)):
+    """Registro de uso do modelo, paginado (v1.7; DS: 10 por página), mais recente primeiro."""
+    total = session.scalar(select(func.count(models.LlmCall.id))) or 0
+    pages = max(1, -(-total // per_page))
+    page = min(page, pages)
+    rows = session.scalars(select(models.LlmCall).order_by(models.LlmCall.id.desc())
+                           .offset((page - 1) * per_page).limit(per_page)).all()
+    return {
+        "page": page, "pages": pages, "per_page": per_page, "total": total,
+        "items": [
+            {"id": r.id, "created_at": r.created_at.isoformat() if r.created_at else None, "model": r.model,
+             "prompt": f"{r.prompt_name}.{r.prompt_version}", "input_tokens": r.input_tokens,
+             "output_tokens": r.output_tokens, "latency_ms": r.latency_ms, "attempts": r.attempts,
+             "status": r.status, "error": r.error}
+            for r in rows
+        ],
+    }
