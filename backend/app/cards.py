@@ -396,15 +396,28 @@ def card_of_day(session: Session, today: date) -> models.Card | None:
         return None
     exams: dict[int, date | None] = {}
 
-    def key(c: models.Card) -> tuple:
+    def exam_of(c: models.Card) -> date:
         topic = session.get(models.Topic, c.topic_id)
         if topic.subject_id not in exams:
             exams[topic.subject_id] = _next_exam(session, topic.subject_id, today)
-        mistake = session.get(models.Mistake, c.mistake_id) if c.mistake_id else None
-        return (exams[topic.subject_id] or date.max, c.next_review > today,
-                -MISTAKE_WEIGHT.get(mistake.status if mistake else "", 0), c.step, c.id)
+        return exams[topic.subject_id] or date.max
 
-    best = min(cards, key=key)
+    def key(c: models.Card) -> tuple:
+        mistake = session.get(models.Mistake, c.mistake_id) if c.mistake_id else None
+        return (exam_of(c), -MISTAKE_WEIGHT.get(mistake.status if mistake else "", 0), c.step, c.id)
+
+    # v1.8.2: primeiro os cards vencidos (ponto fraco da prova mais próxima). Sem nenhum vencido, entra o card
+    # revisado há mais tempo e nunca o de ontem; antes, o mesmo card voltava todo dia mesmo depois de acertar.
+    due = [c for c in cards if c.next_review <= today]
+    if due:
+        best = min(due, key=key)
+    else:
+        yesterday = today - timedelta(days=1)
+        pool = [c for c in cards if c.day_card_on != yesterday] or cards
+        last = dict(session.execute(select(models.CardReview.card_id, func.max(models.CardReview.created_at))
+                                    .where(models.CardReview.card_id.in_([c.id for c in pool]))
+                                    .group_by(models.CardReview.card_id)).all())
+        best = min(pool, key=lambda c: (last.get(c.id) or datetime.min, exam_of(c), c.id))
     best.day_card_on = today
     session.commit()
     return best

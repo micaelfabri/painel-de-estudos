@@ -137,7 +137,14 @@ export function SubjectDialog({ open, onOpenChange, subject, degreeId, semesters
             {() => <Input id="s-code" value={form.code} onChange={(e) => set("code")(e.target.value)} />}
           </Field>
           <Field id="s-hours" label="Carga horária (h)" optional>
-            {() => <Input id="s-hours" inputMode="numeric" value={form.hours} onChange={(e) => set("hours")(e.target.value)} />}
+            {() => (
+              <Input
+                id="s-hours"
+                inputMode="numeric"
+                value={form.hours}
+                onChange={(e) => set("hours")(e.target.value)}
+              />
+            )}
           </Field>
           <Field id="s-semester" label="Semestre">
             {() => (
@@ -190,6 +197,11 @@ export function SubjectDialog({ open, onOpenChange, subject, degreeId, semesters
             <>
               <Separator />
               <h3 className="text-sm font-semibold">Progresso no portal</h3>
+              {/* v1.8.2: os contadores são do portal; os temas da lista têm cadastro próprio (Temas) */}
+              <p className="text-xs text-muted-foreground">
+                Os números do portal, como aparecem lá. Não mudam a lista de temas: para acrescentar ou apagar temas,
+                use "Temas" na disciplina.
+              </p>
               <Field id="pp-percent" label="Progresso geral (%)" optional>
                 {() => (
                   <Input

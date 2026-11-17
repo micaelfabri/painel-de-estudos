@@ -22,6 +22,8 @@ interface ChatEntry {
   role: "user" | "agent";
   kind: "text" | "error" | "summary" | "result";
   text: string;
+  /** v1.10 (D52): prints enviados nesta mensagem (só na tela; o servidor não guarda a imagem) */
+  images?: string[];
   /** Repetir a ação que falhou */
   retry?: () => void;
   setId?: number;
@@ -55,7 +57,7 @@ interface AgentState {
   setActiveSet: (s: QuestionSetView | null) => void;
   topicId: number | null;
   setTopicId: (id: number | null) => void;
-  sendChat: (message: string) => void;
+  sendChat: (message: string, images?: string[]) => void;
   generate: (params: { topicId: number; text: string | null; nOptions: number; attemptType?: string }) => void;
   /** v1.3: inicia um conjunto por outra rota (refazer erradas, teste de foco, simulado) */
   startSet: (params: { userText: string; pendingLabel: string; path: string; body: Record<string, unknown> }) => void;
@@ -184,8 +186,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   );
 
   const sendChat = React.useCallback(
-    (message: string) => {
-      pushEntry({ role: "user", kind: "text", text: message });
+    (message: string, images: string[] = []) => {
+      pushEntry({ role: "user", kind: "text", text: message, images: images.length ? images : undefined });
       const attempt = () =>
         run(
           "Pensando…",
@@ -193,7 +195,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             api.post<{ answer: string }>(
               "/agent/chat",
               // O servidor junta as últimas mensagens salvas como contexto
-              { message, topic_id: topicId, model },
+              { message, topic_id: topicId, model, images },
               signal,
             ),
           (res) => {

@@ -11,7 +11,7 @@ import { Select } from "@/components/ui/select";
 import { api, type Deadline, type Exam, type Subject } from "@/lib/api";
 import { formatDayMonth, formatTime, parseLocalDate, parseLocalDateTime } from "@/lib/format";
 import { useApi } from "@/lib/useApi";
-import { useCollegeSubjects } from "@/lib/area";
+import { type CollegeSubject, useCollegeSubjects } from "@/lib/area";
 
 export type Editing = { type: "exam"; item: Exam | null } | { type: "deadline"; item: Deadline | null } | null;
 
@@ -38,7 +38,9 @@ export function ExamsPage() {
   const subjects = useApi<Subject[]>("/subjects");
   const collegeSubjects = useCollegeSubjects();
   const [editing, setEditing] = React.useState<Editing>(null);
-  const subjectName = (id: number | null) => subjects.data?.find((s) => s.id === id)?.name ?? "—";
+  // v1.8.2: com o semestre, para distinguir a disciplina repetida
+  const subjectName = (id: number | null) =>
+    collegeSubjects.find((s) => s.id === id)?.label ?? subjects.data?.find((s) => s.id === id)?.name ?? "—";
 
   return (
     <div className="space-y-6">
@@ -139,7 +141,7 @@ export function EditDialog({
   onSaved,
 }: {
   editing: Editing;
-  subjects: Subject[];
+  subjects: CollegeSubject[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -211,7 +213,7 @@ export function EditDialog({
 
   const subjectOptions = subjects.map((s) => ({
     value: String(s.id),
-    label: s.name,
+    label: s.label,
   }));
   const isExam = editing?.type === "exam";
 

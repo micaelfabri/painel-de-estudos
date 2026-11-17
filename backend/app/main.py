@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import cards, course, courses, learning, models, overview, schemas, settings_store, study
+from . import cards, course, courses, hub, learning, models, overview, review, schemas, settings_store, study
 from .agent.router import router as agent_router
 from .crud import crud_router
 from .db import get_session
@@ -22,18 +22,24 @@ app = FastAPI(title="Painel de Estudos", version="0.1.0")
 
 # --- Endurecimento (auditoria de segurança, docs/security-audit) --------------
 # Host permitido: bloqueia DNS rebinding (um site externo apontando um domínio para 127.0.0.1).
-ALLOWED_HOSTS = [h.strip() for h in os.environ.get("PAINEL_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+# D45: host.docker.internal é o nome que o hub (no Docker) usa para chegar aqui; só o Docker resolve esse nome,
+# então um site externo não consegue usá-lo para DNS rebinding.
+DEFAULT_ALLOWED_HOSTS = "localhost,127.0.0.1,host.docker.internal"
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get("PAINEL_ALLOWED_HOSTS", DEFAULT_ALLOWED_HOSTS).split(",") if h.strip()]
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
+# D45: o Painel abre dentro do hub pessoal (iframe em localhost:8100) e em nenhum outro site.
+# X-Frame-Options não sabe liberar uma origem só, por isso o controle fica no frame-ancestors do CSP.
+HUB_FRAME_ANCESTORS = "'self' http://localhost:8100 http://127.0.0.1:8100"
+
 SECURITY_HEADERS = {
-    "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; "
-        "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+        f"frame-ancestors {HUB_FRAME_ANCESTORS}; base-uri 'self'; form-action 'self'; object-src 'none'"
     ),
 }
 
@@ -88,7 +94,8 @@ app.include_router(
 )
 app.include_router(
     crud_router(prefix="/api/topics", model=models.Topic, schema_in=schemas.TopicIn, schema_out=schemas.TopicOut,
-                filters=("subject_id",), order_by=("subject_id", "position"), tag="temas")
+                filters=("subject_id",), order_by=("subject_id", "position"), tag="temas",
+                before_delete=learning.guard_topic_delete)
 )
 app.include_router(
     crud_router(prefix="/api/exams", model=models.Exam, schema_in=schemas.ExamIn, schema_out=schemas.ExamOut,
@@ -115,6 +122,8 @@ app.include_router(cards.router)
 app.include_router(prints.router)
 app.include_router(course.router)
 app.include_router(courses.router)
+app.include_router(hub.router)  # D45: resumo para o hub pessoal
+app.include_router(review.router)  # D51: semestres em revisão
 app.include_router(notion.router)
 app.include_router(google_calendar.router)
 app.include_router(

@@ -368,6 +368,10 @@ export interface ChecklistItem {
   review_id: number | null;
   done: boolean;
   position: number;
+  /** v1.8.3 (D49): não feita aqui e passada para este dia */
+  carried_to?: string | null;
+  /** Só no histórico: primeiro dia da tarefa que foi passada adiante */
+  started_on?: string | null;
 }
 
 export interface MistakeReview {
@@ -820,4 +824,27 @@ export interface CourseModuleOption {
   name: string;
   course_id: number;
   course_name: string;
+}
+
+// v1.9 (D51): semestres em revisão
+export type ReviewReasonKey = "failed" | "not_learned" | "not_consolidated" | "not_seen_all";
+export interface ReviewSubject {
+  id: number;
+  name: string;
+  status: "passed" | "failed";
+  reasons: { key: ReviewReasonKey; label: string; detail: string }[];
+  topics: { id: number; title: string; why: string[]; has_text: boolean }[];
+  more_topics: number;
+  has_text: boolean;
+}
+export interface ReviewSemester {
+  semester_id: number | null;
+  code: string | null;
+  is_current: boolean;
+  subjects: ReviewSubject[];
+  counts: Record<ReviewReasonKey, number>;
+}
+export interface ReviewResponse {
+  reasons: Record<ReviewReasonKey, string>;
+  semesters: ReviewSemester[];
 }

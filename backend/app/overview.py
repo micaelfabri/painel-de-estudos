@@ -128,6 +128,7 @@ def next_action(subjects: list[dict]) -> dict | None:
         "subject_id": first["id"],
         "subject_name": first["name"],
         "topic_id": topics[0]["id"] if topics else None,
+        "topic_ids": [t["id"] for t in topics[:2]],  # v1.10 (D53): os temas citados no passo de estudo
         "steps": steps,
         "exam_date": first["exam"]["date"],
         "exam_days_left": first["exam"]["days_left"],

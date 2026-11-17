@@ -36,7 +36,7 @@ A local study panel + local study agent for its owner. Full scope, decisions and
 ### AI rules
 - Every LLM call goes through one client module that: validates JSON with a Pydantic schema, retries once, logs to `llm_call` (model, prompt version, tokens, latency, status).
 - Prompts live in `backend/prompts/*.md` with a version header. Changing a prompt = new version; never edit a released version in place.
-- Never send personal data (grades, names, calendar) to the model. Only topic text and questions. Exceptions authorized by the owner (SPEC D17/D18, D25, D36), local model only: prints of the owner's answers (linked Notion pages or the read-only materials folder) to propose scores and to turn questions into study cards; a short summary of the study numbers (hours, test scores, topics, timer) in the agent chat, which can be turned off in Settings. Videos only through transcript files.
+- Never send personal data (grades, names, calendar) to the model. Only topic text and questions. Exceptions authorized by the owner (SPEC D17/D18, D25, D36), local model only: prints of the owner's answers (linked Notion pages or the read-only materials folder) to propose scores and to turn questions into study cards; a short summary of the study numbers (hours, test scores, topics, timer) in the agent chat, which can be turned off in Settings. Videos only through transcript files. Also authorized (SPEC D52): images the owner attaches or pastes in the agent chat, local model only, not saved.
 - No cloud LLMs (Claude, Gemini, OpenAI) in the app.
 
 ### Integration rules
@@ -82,7 +82,7 @@ Um painel de estudos local + agente de estudos local para o dono. Escopo complet
 ### Regras de IA
 - Toda chamada ao LLM passa por um único módulo cliente que: valida o JSON com schema Pydantic, tenta de novo uma vez, registra em `llm_call` (modelo, versão do prompt, tokens, tempo, status).
 - Os prompts ficam em `backend/prompts/*.md` com cabeçalho de versão. Mudar um prompt = nova versão; nunca editar uma versão já usada.
-- Nunca mandar dados pessoais (notas, nomes, agenda) ao modelo. Só texto do tema e questões. Exceções autorizadas pelo dono (SPEC D17/D18, D25, D36), só modelo local: prints das respostas do dono (páginas do Notion ligadas ou a pasta de materiais, só leitura) para propor notas e para transformar questões em cards de estudo; um resumo curto dos números de estudo (horas, notas dos testes, temas, cronômetro) na conversa com o agente, que dá para desligar em Configurações. Vídeos só por arquivos de transcrição.
+- Nunca mandar dados pessoais (notas, nomes, agenda) ao modelo. Só texto do tema e questões. Exceções autorizadas pelo dono (SPEC D17/D18, D25, D36), só modelo local: prints das respostas do dono (páginas do Notion ligadas ou a pasta de materiais, só leitura) para propor notas e para transformar questões em cards de estudo; um resumo curto dos números de estudo (horas, notas dos testes, temas, cronômetro) na conversa com o agente, que dá para desligar em Configurações. Vídeos só por arquivos de transcrição. Também autorizado (SPEC D52): imagens que o dono anexa ou cola na conversa com o agente, só modelo local, sem guardar.
 - Nenhum LLM em nuvem (Claude, Gemini, OpenAI) no app.
 
 ### Regras das integrações

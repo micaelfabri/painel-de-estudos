@@ -21,6 +21,7 @@ def crud_router(
     filters: tuple[str, ...] = (),
     order_by: tuple[str, ...] = ("id",),
     tag: str,
+    before_delete: Any = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=[tag])
 
@@ -80,6 +81,8 @@ def crud_router(
     @router.delete("/{item_id}", status_code=204)
     def delete_item(item_id: int, session: Session = Depends(get_session)):
         obj = _get_or_404(session, item_id)
+        if before_delete is not None:
+            before_delete(session, obj)  # pode recusar com HTTPException (ex.: tema com histórico)
         session.delete(obj)
         _commit(session)
 

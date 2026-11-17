@@ -4,7 +4,7 @@ Faço uma graduação EAD, e estudar um único tema me tomava de 3 a 6 horas: ab
 
 Então decidi construir a ferramenta que eu precisava: um painel que roda no meu próprio PC, com um agente de estudos que transforma o conteúdo de cada tema em resumo e questões no estilo da prova, corrige as minhas respostas e agenda as revisões. A medida de sucesso que defini não é quantas horas eu estudei, e sim se eu aprendi: um tema só conta como **aprendido** quando eu acerto 70% ou mais na revisão de 7 dias.
 
-> Esta é a **versão pública v1.8**, com **dados fictícios** (curso, disciplinas, provas, notas e atividade de estudo inventados). A versão que eu uso no dia a dia fica privada, com os meus dados reais. Esta cópia é atualizada depois de um bom tempo de uso de cada nova versão.
+> Esta é a **versão pública v1.10**, com **dados fictícios** (curso, disciplinas, provas, notas e atividade de estudo inventados). A versão que eu uso no dia a dia fica privada, com os meus dados reais. Esta cópia é atualizada depois de um bom tempo de uso de cada nova versão.
 
 ![Painel no tema claro](docs/prints/painel-claro.png)
 
@@ -24,6 +24,10 @@ Então decidi construir a ferramenta que eu precisava: um painel que roda no meu
 - **Cards de estudo:** feitos a partir do que eu mais erro, dos prints das minhas respostas e de transcrições de vídeo. Respondo com 4 alternativas ou viro o card; cada card volta em 1, 7, 21 e 60 dias. Tem rodada rápida e card do dia.
 - **Histórico e Desempenho:** todo teste fica salvo; gráficos interativos de horas por dia e notas ao longo do tempo, por período e por disciplina.
 - **Provas e prazos:** provas, labs, atividades e simulados numa lista só, com o resultado lido dos prints das minhas respostas (o modelo só propõe; eu confirmo).
+- **Revisão:** as disciplinas encerradas que ainda pedem revisão, por semestre, com o motivo (não aprovado, não aprendeu o suficiente, aprovado mas não consolidado, aprovado mas não viu tudo) e os temas para rever.
+- **Questões da disciplina inteira:** mistura todos os temas (texto salvo ou página do Notion lida na hora), sem tempo e sem repetir questões já feitas.
+- **Prints na conversa:** anexe ou cole (Ctrl+V) imagens no chat do agente; vão só para o modelo local e não ficam salvas.
+- **Tarefas do dia:** a tarefa não terminada passa para o dia seguinte com rastro, e o Histórico mostra as tarefas de cada dia.
 - **Cursos e certificados:** cursos fora da faculdade (livres, certificações, idiomas) num grupo próprio, com módulos e aulas, questões, cards e cronômetro por curso. As horas têm meta separada, a prova de certificação fica só ali e, quando o curso conta como atividade complementar, as horas são lançadas com um clique ao concluir.
 - **Progresso do curso:** horas por componente (mínima, extensionistas, atividades complementares, optativa, estágio).
 - **Regras de avaliação como dados:** cada disciplina tem a sua regra (pesos, nota mínima), sem `if` por disciplina no código.
@@ -47,6 +51,10 @@ Então decidi construir a ferramenta que eu precisava: um painel que roda no meu
 | ![Histórico com a evolução por tema](docs/prints/historico.png) | ![Gráficos de horas e notas](docs/prints/desempenho.png) |
 
 ![Cards de estudo revisados no painel do agente](docs/prints/cards.png)
+
+### Revisão
+
+![Revisão: disciplina encerrada com os motivos e os temas para rever](docs/prints/revisao.png)
 
 ### Cursos e certificados
 

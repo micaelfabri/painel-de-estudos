@@ -269,7 +269,9 @@ def _set_row(session: Session, qs: models.QuestionSet, topics: dict[int, models.
     right = sum(1 for q in answered if q.answer.is_correct)
     return {
         "id": qs.id, "topic_id": qs.topic_id,
-        "topic_title": topic.title if topic else ("Erros para refazer" if qs.attempt_type == "redo" else "Simulado"),
+        "topic_title": topic.title if topic else {"redo": "Erros para refazer",
+                                                   "subject_mix": "Questões da disciplina"}.get(qs.attempt_type,
+                                                                                               "Simulado"),
         "subject_id": subject_id, "subject_name": subjects.get(subject_id),
         "attempt_type": qs.attempt_type, "label": learning.LABELS.get(qs.attempt_type, qs.attempt_type),
         "score": qs.score, "questions": len(valid), "answered": len(answered), "right": right,

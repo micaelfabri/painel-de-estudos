@@ -11,12 +11,13 @@ Ciclo dos erros (v1.5, D28): open (não revisado) → reviewed (revisado, falta 
 fixed (acertou num refazer) ou again (errou de novo, revisar de novo).
 """
 
+import re
 from datetime import date, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import areas, models, settings_store
@@ -45,6 +46,8 @@ LABELS = {
     "focus_errors": "novo teste (erros)",
     "focus_hits": "novo teste (acertos)",
     "simulation": "simulado da prova",
+    # v1.9 (D50): disciplina inteira, sem tempo, fora do ciclo dos temas
+    "subject_mix": "questões da disciplina",
 }
 # Tipos que contam para o ciclo do tema (primeira vez + retestes)
 CYCLE = {"first", *RETEST_DAYS, "retest_3d"}
@@ -275,6 +278,7 @@ class ChecklistIn(BaseModel):
     label: str = Field(min_length=1, max_length=300)
     planned_minutes: int | None = Field(default=None, ge=0, le=24 * 60)
     topic_id: int | None = None
+    topic_ids: list[int] | None = Field(default=None, max_length=20)
     review_id: int | None = None
     done: bool = False
     position: int = 0
@@ -282,7 +286,24 @@ class ChecklistIn(BaseModel):
 
 def _item_out(i: models.ChecklistItem) -> dict:
     return {"id": i.id, "day": i.day.isoformat(), "label": i.label, "planned_minutes": i.planned_minutes,
-            "topic_id": i.topic_id, "review_id": i.review_id, "done": i.done, "position": i.position}
+            "topic_id": i.topic_id, "review_id": i.review_id, "done": i.done, "position": i.position,
+            "carried_to": i.carried_to.isoformat() if i.carried_to else None, "topic_ids": i.topic_ids}
+
+
+def link_carried(session: Session, day: date) -> None:
+    """v1.8.3 (D49): a mesma tarefa, aberta num dia anterior, passa a apontar para este dia.
+
+    Assim a tarefa "vai" para o outro dia em vez de duplicar: o dia antigo mostra "passou para DD/MM" e
+    deixa de contar como pendente.
+    """
+    session.flush()
+    labels = set(session.scalars(select(models.ChecklistItem.label).where(models.ChecklistItem.day == day)).all())
+    if not labels:
+        return
+    for old in session.scalars(select(models.ChecklistItem).where(
+            models.ChecklistItem.day < day, models.ChecklistItem.done.is_(False),
+            models.ChecklistItem.carried_to.is_(None), models.ChecklistItem.label.in_(labels))).all():
+        old.carried_to = day
 
 
 @router.get("/checklist")
@@ -299,6 +320,7 @@ def get_checklist(day: date | None = Query(None), session: Session = Depends(get
 def add_checklist_item(data: ChecklistIn, session: Session = Depends(get_session)):
     item = models.ChecklistItem(**data.model_dump())
     session.add(item)
+    link_carried(session, item.day)
     session.commit()
     return _item_out(item)
 
@@ -319,13 +341,124 @@ def patch_checklist_item(item_id: int, data: ChecklistPatch, session: Session = 
     return _item_out(item)
 
 
+TASK_HISTORY_DAYS = 120
+
+
+@router.get("/checklist/history")
+def checklist_history(day: date | None = Query(None, description="Só para testes; padrão = hoje"),
+                      session: Session = Depends(get_session)):
+    """v1.8.2: as tarefas de cada dia (feitas e não feitas), do mais recente para o mais antigo."""
+    day = day or date.today()
+    rows = session.scalars(
+        select(models.ChecklistItem)
+        .where(models.ChecklistItem.day <= day, models.ChecklistItem.day > day - timedelta(days=TASK_HISTORY_DAYS))
+        .order_by(models.ChecklistItem.day.desc(), models.ChecklistItem.position, models.ChecklistItem.id)
+    ).all()
+    days: dict[date, list[models.ChecklistItem]] = {}
+    for r in rows:
+        days.setdefault(r.day, []).append(r)
+    # D49: de onde veio cada tarefa passada adiante (o primeiro dia da cadeia), para "começou em DD/MM"
+    came_from: dict[tuple[str, date], date] = {}
+    for r in sorted(rows, key=lambda r: r.day):
+        if r.carried_to:
+            came_from[(r.label, r.carried_to)] = came_from.get((r.label, r.day), r.day)
+
+    def out(i: models.ChecklistItem) -> dict:
+        start = came_from.get((i.label, i.day))
+        return {**_item_out(i), "started_on": start.isoformat() if start else None}
+
+    return [{"day": d.isoformat(), "done": sum(i.done for i in items),
+             "total": sum(1 for i in items if not i.carried_to),
+             "carried": sum(1 for i in items if i.carried_to),
+             "tasks": [out(i) for i in items]} for d, items in days.items()]
+
+
+@router.get("/checklist/{item_id}/topics")
+def checklist_item_topics(item_id: int, session: Session = Depends(get_session)):
+    """v1.8.2: temas citados na tarefa, para perguntar se marca como concluídos no portal."""
+    item = session.get(models.ChecklistItem, item_id)
+    if item is None:
+        raise HTTPException(404, "item não encontrado")
+    return [{"id": t.id, "title": t.title, "portal_done": t.portal_done} for t in label_topics(session, item)]
+
+
+@router.post("/checklist/{item_id}/topics-done")
+def checklist_item_topics_done(item_id: int, session: Session = Depends(get_session)):
+    """Marca como concluídos no portal os temas citados na tarefa (só depois do OK na tela)."""
+    item = session.get(models.ChecklistItem, item_id)
+    if item is None:
+        raise HTTPException(404, "item não encontrado")
+    marked = [t for t in label_topics(session, item) if not t.portal_done]
+    for t in marked:
+        t.portal_done = True
+    session.commit()
+    return {"marked": [t.title for t in marked]}
+
+
 @router.delete("/checklist/{item_id}", status_code=204)
 def delete_checklist_item(item_id: int, session: Session = Depends(get_session)):
     item = session.get(models.ChecklistItem, item_id)
     if item is None:
         raise HTTPException(404, "item não encontrado")
+    # D49: apagou a cópia deste dia: a tarefa dos dias anteriores volta a ser pendente (sem rastro solto)
+    if not session.scalar(select(func.count()).select_from(models.ChecklistItem).where(
+            models.ChecklistItem.day == item.day, models.ChecklistItem.label == item.label,
+            models.ChecklistItem.id != item.id)):
+        for old in session.scalars(select(models.ChecklistItem).where(
+                models.ChecklistItem.carried_to == item.day, models.ChecklistItem.label == item.label)).all():
+            old.carried_to = None
     session.delete(item)
     session.commit()
+
+
+
+# --- v1.8.2: tarefas de tema ligadas aos temas que citam --------------------------------------------
+STUDY_PREFIXES = ("Estudar ", "Concluir ")
+
+
+def label_topics(session: Session, item: models.ChecklistItem) -> list[models.Topic]:
+    """Temas citados numa tarefa "Concluir Tema 3 e Tema 4 · Disciplina".
+
+    v1.10 (D53): a tarefa guarda os ids dos temas (topic_ids) e vale isso. Tarefas antigas sem a lista: os temas
+    saem do texto, procurando os títulos da mesma disciplina (com borda de palavra: "Tema 1" não casa com "Tema 10").
+    """
+    if item.topic_ids:
+        found = session.scalars(select(models.Topic).where(models.Topic.id.in_(item.topic_ids))
+                                .order_by(models.Topic.position, models.Topic.id)).all()
+        if found:
+            return list(found)
+    if not item.topic_id or not item.label.startswith(STUDY_PREFIXES):
+        return []
+    first = session.get(models.Topic, item.topic_id)
+    if first is None:
+        return []
+    text = item.label.split(" · ")[0]
+    siblings = session.scalars(select(models.Topic).where(models.Topic.subject_id == first.subject_id)
+                               .order_by(models.Topic.position, models.Topic.id)).all()
+    found = [t for t in siblings
+             if re.search(rf"(?<![\w]){re.escape(t.title)}(?![\w])", text)]
+    return found or [first]
+
+
+def _topics_all_done(session: Session, item: models.ChecklistItem) -> bool:
+    topics = label_topics(session, item)
+    return bool(topics) and all(t.portal_done for t in topics)
+
+
+def guard_topic_delete(session: Session, topic: models.Topic) -> None:
+    """Só apaga tema sem histórico: testes, cards, erros, retestes, tarefas, sessões ou conversa."""
+    uses = {
+        "teste(s)": models.QuestionSet, "card(s)": models.Card, "erro(s)": models.Mistake,
+        "reteste(s)": models.ReviewSchedule, "tarefa(s)": models.ChecklistItem,
+        "sessão(ões) de estudo": models.StudySession, "mensagem(ns) da conversa": models.ChatMessage,
+    }
+    found = []
+    for label, model in uses.items():
+        n = session.scalar(select(func.count()).select_from(model).where(model.topic_id == topic.id)) or 0
+        if n:
+            found.append(f"{n} {label}")
+    if found:
+        raise HTTPException(409, f"{topic.title} tem histórico ({', '.join(found)}) e não pode ser apagado.")
 
 
 # v1.7.2: tarefas não feitas de dias anteriores podem ser trazidas para hoje. O item do dia antigo fica como
@@ -341,10 +474,17 @@ def _pending_from_past(session: Session, day: date) -> list[models.ChecklistItem
     """
     today_labels = set(session.scalars(select(models.ChecklistItem.label)
                                        .where(models.ChecklistItem.day == day)).all())
+    # v1.8.2: a última vez que cada tarefa foi marcada; a pendente de antes disso já foi resolvida
+    done_on: dict[str, date] = {}
+    for label, d in session.execute(select(models.ChecklistItem.label, func.max(models.ChecklistItem.day))
+                                    .where(models.ChecklistItem.done.is_(True), models.ChecklistItem.day <= day)
+                                    .group_by(models.ChecklistItem.label)).all():
+        done_on[label] = d
     rows = session.scalars(
         select(models.ChecklistItem)
         .where(models.ChecklistItem.day < day, models.ChecklistItem.day >= day - timedelta(days=CARRY_DAYS),
-               models.ChecklistItem.done.is_(False), models.ChecklistItem.review_id.is_(None))
+               models.ChecklistItem.done.is_(False), models.ChecklistItem.review_id.is_(None),
+               models.ChecklistItem.carried_to.is_(None))
         .order_by(models.ChecklistItem.day.desc(), models.ChecklistItem.position, models.ChecklistItem.id)
     ).all()
     seen: set[str] = set()
@@ -353,6 +493,9 @@ def _pending_from_past(session: Session, day: date) -> list[models.ChecklistItem
         if r.label in today_labels or r.label in seen or r.label.startswith("Revisar cards vencidos"):
             continue
         seen.add(r.label)
+        # v1.8.2: marcada num dia depois, ou temas já concluídos no portal: nada a trazer
+        if done_on.get(r.label, date.min) >= r.day or _topics_all_done(session, r):
+            continue
         out.append(r)
     return out
 
@@ -364,7 +507,7 @@ def get_pending(day: date | None = Query(None), session: Session = Depends(get_s
 
 @router.post("/checklist/carry")
 def carry_pending(day: date | None = Query(None), session: Session = Depends(get_session)):
-    """Traz para o dia as não feitas de dias anteriores (cópia; o dia antigo fica como estava)."""
+    """Leva para o dia as não feitas de dias anteriores (D49: o dia antigo fica com "passou para DD/MM")."""
     day = day or date.today()
     pending = _pending_from_past(session, day)
     position = max(session.scalars(select(models.ChecklistItem.position)
@@ -372,7 +515,8 @@ def carry_pending(day: date | None = Query(None), session: Session = Depends(get
     for r in pending:
         position += 1
         session.add(models.ChecklistItem(day=day, label=r.label, planned_minutes=r.planned_minutes,
-                                         topic_id=r.topic_id, position=position))
+                                         topic_id=r.topic_id, topic_ids=r.topic_ids, position=position))
+    link_carried(session, day)
     session.commit()
     return {"added": len(pending), "items": get_checklist(day, session)}
 
@@ -411,19 +555,31 @@ def plan_day(day: date | None = Query(None), session: Session = Depends(get_sess
 
     action = compute_overview(session, day)["next_study_action"]
     goal = int(settings_store.get(session, "timer_goal_minutes"))
+    # v1.8.2: temas que já têm tarefa hoje (feita ou não) não viram outra tarefa com o nome trocado
+    covered = {t.id for i in existing for t in label_topics(session, i)}
+    open_study_subjects = {t.subject_id for i in existing if not i.done for t in label_topics(session, i)[:1]}
     if action and action.get("kind") == "study":
         for step in action["steps"]:
             label = f"{step[0].upper()}{step[1:]} · {action['subject_name']}"
             if label in have_labels:
                 continue
-            position += 1
             is_topic = step.startswith(("Estudar", "Concluir"))
-            session.add(models.ChecklistItem(day=day, label=label, position=position,
-                                             planned_minutes=goal if is_topic else None,
-                                             topic_id=action["topic_id"] if is_topic else None))
+            item = models.ChecklistItem(day=day, label=label, position=position + 1,
+                                        planned_minutes=goal if is_topic else None,
+                                        topic_id=action["topic_id"] if is_topic else None,
+                                        topic_ids=action.get("topic_ids") or None if is_topic else None)
+            if is_topic and covered & {t.id for t in label_topics(session, item)}:
+                continue
+            # D53: já há tarefa de estudo aberta desta disciplina hoje (ex.: criada antes de renomear os temas):
+            # não cria outra; a de hoje continua valendo
+            if is_topic and action["subject_id"] in open_study_subjects:
+                continue
+            position += 1
+            session.add(item)
             added += 1
     if with_courses:
         added, position = _plan_courses(session, day, have_labels, position, added)
+    link_carried(session, day)
     session.commit()
     return {"added": added, "items": get_checklist(day, session)}
 

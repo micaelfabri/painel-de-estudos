@@ -33,6 +33,7 @@ SHOTS = {
         ("12-cards.png", "Estudo → Cards: gerar dos pontos fracos, de prints ou de vídeo; revisar por tema."),
         ("13-cursos.png", "Cursos e certificados → Meus cursos: horas, certificados, próxima prova e um card por curso."),
         ("14-curso-detalhe.png", "Página de um curso: certificado e AAC, cronômetro, módulos e aulas."),
+        ("15-revisao.png", "Revisão: disciplinas encerradas que pedem revisão, com o motivo e os temas para rever."),
     ],
     "3. LM Studio, uma vez só": [
         ("08-configuracoes.png", "Gerenciar → Configurações: endereço do modelo e modelo padrão."),

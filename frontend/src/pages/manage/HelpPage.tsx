@@ -8,7 +8,8 @@ const SECTIONS: { title: string; items: string[] }[] = [
     items: [
       "Abra o Docker Desktop e o LM Studio (Developer → Local Server → Status: Running).",
       "No PowerShell, na pasta do projeto: docker compose up. Abra http://localhost:8000.",
-      'No painel do agente, clique em "Montar o dia": entram os retestes vencidos e o próximo passo de estudo. Tarefas não feitas de dias anteriores: "Trazer para hoje".',
+      'No painel do agente, clique em "Montar o dia": entram os retestes vencidos e o próximo passo de estudo. Tarefas não feitas de dias anteriores: "Passar para hoje" (o dia antigo mostra "passou para DD/MM").',
+      'Ao marcar uma tarefa "Concluir Tema…", o painel pergunta se marca esses temas como concluídos no portal. As tarefas de todos os dias ficam em Histórico › Tarefas por dia.',
     ],
   },
   {
@@ -65,6 +66,15 @@ const SECTIONS: { title: string; items: string[] }[] = [
       "Resultado: o painel lê os prints (Notion ou pasta de materiais) e propõe a nota; você confirma. Simulado vale até 1,0 ponto.",
       "O card de cada disciplina mostra a nota prevista e quanto falta na AV/AVS para passar, pela regra da disciplina.",
       "Desempenho: filtre por período e disciplina; clique numa barra para ver o dia (com as tarefas do checklist daquele dia) e num ponto para abrir o teste.",
+    ],
+  },
+  {
+    title: "Revisão e questões da disciplina",
+    items: [
+      'Em "Gerar questões", o tema "Disciplina inteira" mistura todos os temas com texto salvo, sem tempo e sem repetir questões já feitas. O mesmo botão está no Histórico, ao lado do simulado.',
+      "Na conversa com o agente, anexe prints pelo botão de imagem ou cole com Ctrl+V (até 3 por mensagem). Vão só para o modelo local e não ficam salvos.",
+      "Revisão mostra as disciplinas encerradas que ainda pedem revisão, por semestre: não aprovado, não aprendeu o suficiente, aprovado mas não consolidado e aprovado mas não viu tudo.",
+      "Os motivos saem dos testes, dos retestes, dos erros e do progresso no portal; marque a disciplina como aprovada ou reprovada em Gerenciar para ela entrar.",
     ],
   },
   {

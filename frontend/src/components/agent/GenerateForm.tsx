@@ -17,10 +17,11 @@ import { useAgent } from "./AgentContext";
 // Mesmo limite do backend (MAX_TEXT em agent/router.py)
 const MAX_TEXT = 30_000;
 const fmt = (n: number) => n.toLocaleString("pt-BR");
+const WHOLE = "__disciplina__";
 
 /** Escolher tema, colar o texto e gerar resumo + questões */
 export function GenerateForm({ onDone }: { onDone: () => void }) {
-  const { generate, pending, topicId, setTopicId, preset, setPreset } = useAgent();
+  const { generate, startSet, pending, topicId, setTopicId, preset, setPreset } = useAgent();
   const overview = useApi<Overview>("/overview");
   const settings = useApi<SettingsResponse>("/settings");
   const subjects = overview.data?.subjects ?? [];
@@ -57,18 +58,39 @@ export function GenerateForm({ onDone }: { onDone: () => void }) {
     if (!subjectId) return;
     api.get<Topic[]>(`/topics?subject_id=${subjectId}`).then((list) => {
       setTopics(list);
-      const wanted = preset && String(preset.subjectId) === subjectId ? list.find((t) => t.id === preset.topicId) : undefined;
+      const wanted =
+        preset && String(preset.subjectId) === subjectId ? list.find((t) => t.id === preset.topicId) : undefined;
       const firstPending = wanted ?? list.find((t) => !t.portal_done) ?? list[0];
       if (firstPending) setTopic(String(firstPending.id));
     });
   }, [subjectId, preset]);
 
   const selected = topics.find((t) => String(t.id) === topic);
+  // v1.9 (D50): a disciplina inteira; v1.9.1: vale texto salvo ou página do Notion ligada (lida na hora)
+  const whole = topic === WHOLE;
+  const withText = topics.filter((t) => t.source_text || t.notion_page_id);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (whole) {
+      if (!withText.length)
+        return setError("Nenhum tema desta disciplina tem texto salvo nem página do Notion ligada.");
+      if (!nOptions) return setError("Escolha quantas alternativas por questão.");
+      setError(undefined);
+      const name = subjects.find((s) => String(s.id) === subjectId)?.name ?? "a disciplina";
+      startSet({
+        userText: `Gerar questões de ${name} inteira.`,
+        pendingLabel: "Gerando questões da disciplina…",
+        path: "/agent/question-sets/subject",
+        body: { subject_id: Number(subjectId), n_options: Number(nOptions) },
+      });
+      setPreset(null);
+      onDone();
+      return;
+    }
     if (!selected) return setError("Escolha o tema.");
-    if (!text.trim() && !selected.source_text) return setError("Cole o texto do tema (só o texto; prints só de diagramas).");
+    if (!text.trim() && !selected.source_text)
+      return setError("Cole o texto do tema (só o texto; prints só de diagramas).");
     if (text.trim().length > MAX_TEXT)
       return setError(
         `O texto tem ${fmt(text.trim().length)} caracteres; o limite é ${fmt(MAX_TEXT)}. Cole uma parte por vez (ex.: um módulo).`,
@@ -110,25 +132,48 @@ export function GenerateForm({ onDone }: { onDone: () => void }) {
             onValueChange={setTopic}
             placeholder="Escolha"
             disabled={topics.length === 0}
-            options={topics.map((t) => ({
-              value: String(t.id),
-              label: t.title + (t.portal_done ? " (concluído no portal)" : ""),
-            }))}
+            options={[
+              ...(topics.length > 1 && !preset
+                ? [{ value: WHOLE, label: `Disciplina inteira (${withText.length} tema(s) com texto ou Notion)` }]
+                : []),
+              ...topics.map((t) => ({
+                value: String(t.id),
+                label: t.title + (t.portal_done ? " (concluído no portal)" : ""),
+              })),
+            ]}
           />
         )}
       </Field>
-      <Field
-        id="g-text"
-        label="Texto do tema"
-        optional={!!selected?.source_text}
-        hint={
-          (selected?.source_text ? "Já há um texto salvo para este tema; deixe vazio para usá-lo." : "Cole só o texto do conteúdo.") +
-          (text ? ` ${fmt(text.trim().length)} de ${fmt(MAX_TEXT)} caracteres.` : "")
-        }
-      >
-        {(d) => <Textarea id="g-text" rows={5} value={text} aria-describedby={d} onChange={(e) => setText(e.target.value)} />}
-      </Field>
-      {selected?.notion_page_id && (
+      {whole && (
+        <p className="text-sm text-muted-foreground">
+          Mistura os temas com texto salvo ou página do Notion (lida na hora), sem tempo, e evita repetir questões já
+          feitas. Fica fora dos retestes dos temas; os erros vão para "Revisar erros".
+        </p>
+      )}
+      {!whole && (
+        <Field
+          id="g-text"
+          label="Texto do tema"
+          optional={!!selected?.source_text}
+          hint={
+            (selected?.source_text
+              ? "Já há um texto salvo para este tema; deixe vazio para usá-lo."
+              : "Cole só o texto do conteúdo.") +
+            (text ? ` ${fmt(text.trim().length)} de ${fmt(MAX_TEXT)} caracteres.` : "")
+          }
+        >
+          {(d) => (
+            <Textarea
+              id="g-text"
+              rows={5}
+              value={text}
+              aria-describedby={d}
+              onChange={(e) => setText(e.target.value)}
+            />
+          )}
+        </Field>
+      )}
+      {!whole && selected?.notion_page_id && (
         <Button
           variant="outline"
           className="w-full disabled:cursor-wait"
@@ -157,8 +202,12 @@ export function GenerateForm({ onDone }: { onDone: () => void }) {
           {loadingNotion ? "Lendo o Notion… (página longa pode levar 1 min)" : "Usar o texto do Notion"}
         </Button>
       )}
-      {notionSections.length > 0 && (
-        <Field id="g-section" label="Parte da página do Notion" hint="Mande um módulo por vez: as questões ficam mais focadas.">
+      {!whole && notionSections.length > 0 && (
+        <Field
+          id="g-section"
+          label="Parte da página do Notion"
+          hint="Mande um módulo por vez: as questões ficam mais focadas."
+        >
           {(d) => (
             <Select
               id="g-section"
@@ -198,7 +247,7 @@ export function GenerateForm({ onDone }: { onDone: () => void }) {
         </p>
       )}
       <Button type="submit" disabled={pending !== null} className="w-full">
-        {preset ? "Gerar o reteste" : "Gerar resumo e questões"}
+        {preset ? "Gerar o reteste" : whole ? "Gerar questões da disciplina" : "Gerar resumo e questões"}
       </Button>
     </form>
   );
