@@ -10,10 +10,11 @@ import { CategoryBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pagination } from "@/components/ui/pagination";
 import { Card } from "@/components/ui/card";
+import { DayTaskList } from "@/components/panel/DayTaskList";
 import { Field } from "@/components/ui/field";
 import { Select } from "@/components/ui/select";
-import { type HistorySet, type SettingsResponse, type TopicEvolution, type Area } from "@/lib/api";
-import { formatDayMonth, formatTime, parseLocalDate, parseLocalDateTime } from "@/lib/format";
+import { type ChecklistItem, type HistorySet, type SettingsResponse, type TopicEvolution, type Area } from "@/lib/api";
+import { formatDayMonth, formatLongDate, formatTime, parseLocalDate, parseLocalDateTime } from "@/lib/format";
 import { usePaged } from "@/lib/usePaged";
 import { AREA_TEXT, useAreaSubjects } from "@/lib/area";
 import { useApi } from "@/lib/useApi";
@@ -37,6 +38,70 @@ function setWhen(s: HistorySet) {
  * Estudo › Histórico (SPEC D15, D16): tudo o que já fiz fica salvo, com refazer e novos testes.
  * v1.8 (D38): a mesma página serve a faculdade e os cursos (`area`).
  */
+type TaskDay = { day: string; done: number; total: number; carried?: number; tasks: ChecklistItem[] };
+
+/** v1.8.2: tarefas do dia que já passaram (feitas e não feitas), 10 dias por página */
+function TaskHistory() {
+  const days = useApi<TaskDay[]>("/learning/checklist/history");
+  const paged = usePaged(days.data ?? []);
+  const loaded = days.data !== undefined && days.data !== null;
+  // Vindo do link "Ver as tarefas dos outros dias" (#tarefas): leva direto para esta seção
+  React.useEffect(() => {
+    if (loaded && window.location.hash === "#tarefas") {
+      paged.anchor.current?.focus({ preventScroll: true });
+      paged.anchor.current?.scrollIntoView?.({ block: "start" });
+    }
+  }, [loaded, paged.anchor]);
+  return (
+    <section className="space-y-3" aria-labelledby="h-tarefas">
+      <h2
+        id="h-tarefas"
+        ref={paged.anchor as React.RefObject<HTMLHeadingElement>}
+        tabIndex={-1}
+        className="scroll-mt-20 text-lg font-semibold focus:outline-none"
+      >
+        Tarefas por dia
+      </h2>
+      {days.data && days.data.length === 0 ? (
+        <Card className="p-6">
+          <p className="text-sm text-muted-foreground">Nenhuma tarefa ainda. Use "Montar o dia" no painel do agente.</p>
+        </Card>
+      ) : (
+        <ul className="space-y-3">
+          {paged.slice.map((d) => (
+            <li key={d.day}>
+              <Card className="space-y-1 p-4">
+                <h3 className="text-sm font-semibold">
+                  {formatLongDate(parseLocalDate(d.day))}
+                  <span className="font-normal text-muted-foreground">
+                    {" "}
+                    {/* D49: dia só com tarefas passadas adiante não mostra "0 de 0 feitas" */}
+                    {[
+                      d.total ? `${d.done} de ${d.total} feitas` : "",
+                      d.carried ? `${d.carried} passada(s) para outro dia` : "",
+                    ]
+                      .filter(Boolean)
+                      .map((t) => `· ${t}`)
+                      .join(" ")}
+                  </span>
+                </h3>
+                <DayTaskList tasks={d.tasks} />
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Pagination
+        page={paged.page}
+        pages={paged.pages}
+        total={paged.total}
+        onPage={paged.goTo}
+        label="Páginas das tarefas por dia"
+      />
+    </section>
+  );
+}
+
 export function HistoryPage({ area = "faculdade" }: { area?: Area }) {
   const { startSet, openSet, learningVersion, pending, openCards } = useAgent();
   const [subjectFilter, setSubjectFilter] = React.useState("all");
@@ -102,8 +167,9 @@ export function HistoryPage({ area = "faculdade" }: { area?: Area }) {
           <h2 className="text-lg font-semibold">Simulado da prova</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          Mistura os temas da disciplina que já têm texto salvo, no tamanho da prova, com tempo correndo. Quando o tempo
-          acaba, entrega sozinho.
+          Mistura os temas da disciplina com texto salvo ou página do Notion (lida na hora), no tamanho da prova, com
+          tempo correndo. Quando o tempo acaba, entrega sozinho. "Questões da disciplina" mistura os mesmos temas sem
+          tempo e sem repetir questões já feitas.
         </p>
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-full sm:w-72">
@@ -135,6 +201,22 @@ export function HistoryPage({ area = "faculdade" }: { area?: Area }) {
           >
             <Timer aria-hidden="true" />
             Fazer simulado
+          </Button>
+          {/* v1.9 (D50): a disciplina inteira, sem tempo */}
+          <Button
+            variant="outline"
+            disabled={!simSubject || busy}
+            onClick={() =>
+              startSet({
+                userText: "Gerar questões da disciplina inteira.",
+                pendingLabel: "Gerando questões da disciplina…",
+                path: "/agent/question-sets/subject",
+                body: { subject_id: Number(simSubject), n_options: nOptions },
+              })
+            }
+          >
+            <Sparkles aria-hidden="true" />
+            Questões da disciplina
           </Button>
         </div>
       </Card>
@@ -345,6 +427,7 @@ export function HistoryPage({ area = "faculdade" }: { area?: Area }) {
           label="Páginas de todos os testes"
         />
       </section>
+      {area === "faculdade" && <TaskHistory />}
     </div>
   );
 }

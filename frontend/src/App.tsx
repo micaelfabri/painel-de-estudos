@@ -10,6 +10,7 @@ import { StudyPage } from "@/pages/StudyPage";
 
 // Cada página (menos o Painel, que abre primeiro) vira um arquivo próprio, baixado só ao abrir
 const AgendaPage = React.lazy(() => import("@/pages/AgendaPage").then((m) => ({ default: m.AgendaPage })));
+const ReviewPage = React.lazy(() => import("@/pages/ReviewPage").then((m) => ({ default: m.ReviewPage })));
 const HistoryPage = React.lazy(() => import("@/pages/HistoryPage").then((m) => ({ default: m.HistoryPage })));
 const CardsPage = React.lazy(() => import("@/pages/CardsPage").then((m) => ({ default: m.CardsPage })));
 const PerformancePage = React.lazy(() =>
@@ -44,6 +45,8 @@ export function App() {
             <Route path="/estudo" element={<StudyPage />} />
             <Route path="/estudo/provas" element={<AgendaPage />} />
             <Route path="/estudo/historico" element={<HistoryPage />} />
+            {/* v1.9 (D51): semestres em revisão */}
+            <Route path="/estudo/revisao" element={<ReviewPage />} />
             <Route path="/estudo/cards" element={<CardsPage />} />
             <Route path="/estudo/desempenho" element={<PerformancePage />} />
             {/* v1.8 (D38): Cursos e certificados reaproveita as páginas da faculdade com area="cursos" */}

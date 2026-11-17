@@ -1,6 +1,9 @@
 """Rotas do agente de estudos (SPEC §6.2, §7)."""
 
+import base64
+import binascii
 import random
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -12,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import areas, learning, models, settings_store
 from ..db import get_session
-from ..integrations import notion
+from ..integrations import notion, prints
 from . import prompts
 from .client import LLMClient, LLMError
 
@@ -135,7 +138,7 @@ def set_title(qs: models.QuestionSet, topic: models.Topic | None, subject: model
     """Título do conjunto: o tema; sem tema, simulado ou "erros" (refazer de vários temas)."""
     if topic:
         return topic.title
-    base = "Erros para refazer" if qs.attempt_type == "redo" else "Simulado"
+    base = {"redo": "Erros para refazer", "subject_mix": "Questões da disciplina"}.get(qs.attempt_type, "Simulado")
     return f"{base} · {subject.name}" if subject else base
 
 
@@ -481,40 +484,130 @@ def simulation_schema(n_questions: int, n_options: int) -> type[BaseModel]:
     return Simulation
 
 
+class _Source:
+    """Um bloco de texto da disciplina: um tema, ou vários temas que dividem a mesma página do Notion."""
+
+    def __init__(self, topic: models.Topic, text: str):
+        self.topic_ids = [topic.id]
+        self.titles = [topic.title]
+        self.text = text
+
+
+def _subject_sources(session: Session, request: Request, subject: models.Subject, what: str) -> list[_Source]:
+    """v1.9.1: os temas da disciplina com o texto de cada um.
+
+    Usa o texto salvo no Painel quando existe; senão, lê na hora a página do Notion ligada ao tema (só leitura).
+    Temas que dividem a mesma página viram um bloco só, para o texto não ir repetido ao modelo.
+    """
+    topics = session.scalars(select(models.Topic).where(models.Topic.subject_id == subject.id)
+                             .order_by(models.Topic.position, models.Topic.id)).all()
+    sources: list[_Source] = []
+    by_page: dict[str, _Source] = {}
+    client = None
+    failed = 0
+    for t in topics:
+        if t.source_text and t.source_text.strip():
+            sources.append(_Source(t, t.source_text))
+            continue
+        if not t.notion_page_id:
+            continue
+        if t.notion_page_id in by_page:  # mesma página de outro tema: junta os títulos
+            by_page[t.notion_page_id].topic_ids.append(t.id)
+            by_page[t.notion_page_id].titles.append(t.title)
+            continue
+        try:
+            client = client or notion.NotionClient(notion.transport_of(request), notion.sleep_of(request))
+            text = client.page_text(t.notion_page_id)
+        except notion.NotionError:
+            failed += 1
+            continue
+        if text.strip():
+            src = _Source(t, text)
+            by_page[t.notion_page_id] = src
+            sources.append(src)
+    if not sources:
+        if failed:
+            raise HTTPException(502, {"message": "Não foi possível ler as páginas do Notion dos temas agora. "
+                                                 "Confira a conexão com o Notion e tente de novo.",
+                                      "status": "notion_error"})
+        raise HTTPException(422, {"message": "Nenhum tema desta disciplina tem texto salvo nem página do Notion "
+                                             f"ligada. Ligue as páginas em Gerenciar → Temas antes {what}.",
+                                  "status": "no_text"})
+    return sources
+
+
+def _topics_block(sources: list[_Source]) -> str:
+    # Cada bloco leva uma fatia igual do limite de texto, para caber no contexto do modelo
+    share = MAX_TEXT // len(sources)
+    return "\n\n".join(f"[{i}] {' / '.join(x.titles)}\n\"\"\"\n{x.text[:share]}\n\"\"\""
+                       for i, x in enumerate(sources, 1))
+
+
+def _pairs(result, sources: list[_Source], n_questions: int) -> list[tuple[GeneratedQuestion, int | None]]:
+    pairs = []
+    for q in result.questions[:n_questions]:
+        idx = q.topic_index if 1 <= q.topic_index <= len(sources) else None
+        pairs.append((q, sources[idx - 1].topic_ids[0] if idx else None))
+    return pairs
+
+
 @router.post("/simulations", status_code=201)
 def generate_simulation(data: SimulationIn, request: Request, session: Session = Depends(get_session),
                         client: LLMClient = Depends(get_client)):
     subject = session.get(models.Subject, data.subject_id)
     if subject is None:
         raise HTTPException(404, "disciplina não encontrada")
-    topics = session.scalars(select(models.Topic).where(models.Topic.subject_id == subject.id,
-                                                        models.Topic.source_text.is_not(None))
-                             .order_by(models.Topic.position)).all()
-    topics = [t for t in topics if t.source_text and t.source_text.strip()]
-    if not topics:
-        raise HTTPException(422, {"message": "Nenhum tema desta disciplina tem texto salvo ainda. "
-                                             "Gere pelo menos um teste de tema antes do simulado.",
-                                  "status": "no_text"})
-    # Cada tema leva uma fatia igual do limite de texto, para caber no contexto do modelo
-    share = MAX_TEXT // len(topics)
-    block = "\n\n".join(f"[{i}] {t.title}\n\"\"\"\n{t.source_text[:share]}\n\"\"\"" for i, t in enumerate(topics, 1))
+    topics = _subject_sources(session, request, subject, "do simulado")
     n_questions = int(settings_store.get(session, "questions_per_set"))
     prompt = prompts.load("generate_simulation")
     rendered = prompt.render(subject_name=subject.name, n_questions=n_questions, n_options=data.n_options,
-                             topics=block)
+                             topics=_topics_block(topics))
     try:
         result, model_used = client.chat_json(prompt, rendered, simulation_schema(n_questions, data.n_options),
                                               data.model)
     except LLMError as exc:
         raise _llm_http_error(exc) from exc
-    pairs = []
-    for q in result.questions[:n_questions]:
-        idx = q.topic_index if 1 <= q.topic_index <= len(topics) else None
-        pairs.append((q, topics[idx - 1].id if idx else None))
     qs = _save_set(session, request, topic_id=None, subject_id=subject.id, attempt_type="simulation",
                    model=model_used, prompt_version=f"{prompt.name}.{prompt.version}",
-                   summary=result.summary.strip(), questions=pairs,
+                   summary=result.summary.strip(), questions=_pairs(result, topics, n_questions),
                    time_limit_minutes=int(settings_store.get(session, "exam_minutes")))
+    return _set_out(qs, None, session)
+
+
+@router.post("/question-sets/subject", status_code=201)
+def generate_subject_set(data: SimulationIn, request: Request, session: Session = Depends(get_session),
+                         client: LLMClient = Depends(get_client)):
+    """v1.9 (D50): questões da disciplina inteira, sem tempo, misturando os temas (texto salvo ou página do Notion).
+
+    Fica fora do ciclo de retestes dos temas (como o simulado); os erros entram em "Revisar erros" pelo tema de
+    cada questão. As questões já feitas na disciplina vão como lista a evitar.
+    """
+    subject = session.get(models.Subject, data.subject_id)
+    if subject is None:
+        raise HTTPException(404, "disciplina não encontrada")
+    topics = _subject_sources(session, request, subject, "das questões da disciplina")
+    n_questions = int(settings_store.get(session, "questions_per_set"))
+    previous = session.scalars(
+        select(models.Question.statement)
+        .join(models.QuestionSet)
+        .outerjoin(models.Topic, models.Topic.id == models.Question.topic_id)
+        .where((models.QuestionSet.subject_id == subject.id) | (models.Topic.subject_id == subject.id)
+               | models.QuestionSet.topic_id.in_([i for x in topics for i in x.topic_ids]))
+        .order_by(models.Question.id.desc())
+        .limit(40)
+    ).all()
+    avoid = "\n".join(f"- {s}" for s in previous) or "(nenhuma)"
+    prompt = prompts.load("generate_subject_questions")
+    rendered = prompt.render(subject_name=subject.name, n_questions=n_questions, n_options=data.n_options,
+                             avoid=avoid, topics=_topics_block(topics))
+    try:
+        result, model_used = client.chat_json(prompt, rendered, simulation_schema(n_questions, data.n_options),
+                                              data.model)
+    except LLMError as exc:
+        raise _llm_http_error(exc) from exc
+    qs = _save_set(session, request, topic_id=None, subject_id=subject.id, attempt_type="subject_mix",
+                   model=model_used, prompt_version=f"{prompt.name}.{prompt.version}",
+                   summary=result.summary.strip(), questions=_pairs(result, topics, n_questions))
     return _set_out(qs, None, session)
 
 
@@ -526,11 +619,30 @@ class ChatMessage(BaseModel):
     content: str = Field(max_length=8000)
 
 
+MAX_CHAT_IMAGES = 3
+MAX_IMAGE_BYTES = 8 * 1024 * 1024  # por imagem, antes de reduzir
+
+
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     topic_id: int | None = None
     model: str | None = None
     history: list[ChatMessage] = Field(default_factory=list, max_length=12)
+    # v1.10 (D52): prints anexados ou colados (Ctrl+V), como data URL; só vão ao modelo local e não ficam salvos
+    images: list[str] = Field(default_factory=list, max_length=MAX_CHAT_IMAGES)
+
+    @field_validator("images")
+    @classmethod
+    def _images(cls, v: list[str]) -> list[str]:
+        out = []
+        for url in v:
+            head, _, data = url.partition(",")
+            if not re.fullmatch(r"data:image/(png|jpeg|jpg|webp|gif);base64", head) or not data:
+                raise ValueError("Mande só imagens (PNG, JPG, WebP ou GIF).")
+            if len(data) * 3 // 4 > MAX_IMAGE_BYTES:
+                raise ValueError("Imagem grande demais (máximo 8 MB).")
+            out.append(url)
+        return out
 
 
 @router.post("/chat")
@@ -551,14 +663,29 @@ def chat(data: ChatIn, session: Session = Depends(get_session), client: LLMClien
     past = [m.model_dump() for m in data.history] or [
         {"role": m.role, "content": m.content} for m in reversed(session.scalars(
             select(models.ChatMessage).order_by(models.ChatMessage.id.desc()).limit(CHAT_CONTEXT)).all())]
-    history = past + [{"role": "user", "content": data.message}]
+    model = data.model
+    if data.images:
+        # D52: a imagem é reduzida e convertida aqui (mesmo caminho dos prints) e vai só ao modelo local;
+        # sem modelo escolhido na tela, usa o modelo de visão das Configurações
+        try:
+            urls = [prints.to_data_url(base64.b64decode(u.partition(",")[2], validate=True)) for u in data.images]
+        except (ValueError, binascii.Error) as exc:
+            raise HTTPException(422, {"message": "Não deu para abrir uma das imagens.", "status": "bad_image"}) from exc
+        model = model or settings_store.get(session, "vision_model") or None
+        content: str | list = [{"type": "text", "text": data.message},
+                               *({"type": "image_url", "image_url": {"url": u}} for u in urls)]
+    else:
+        content = data.message
+    history = past + [{"role": "user", "content": content}]
     try:
-        result, model_used = client.chat_json(prompt, rendered, ChatAnswer, data.model, history)
+        result, model_used = client.chat_json(prompt, rendered, ChatAnswer, model, history)
     except LLMError as exc:
         raise _llm_http_error(exc) from exc
     answer = result.answer.strip()
+    # A conversa salva só o texto; a imagem não fica guardada (vira uma marca no fim da mensagem)
+    saved = data.message + (f"\n[{len(data.images)} imagem(ns) enviada(s)]" if data.images else "")
     session.add_all([
-        models.ChatMessage(role="user", content=data.message, topic_id=data.topic_id),
+        models.ChatMessage(role="user", content=saved, topic_id=data.topic_id),
         models.ChatMessage(role="assistant", content=answer, topic_id=data.topic_id, model=model_used),
     ])
     session.commit()

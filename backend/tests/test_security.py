@@ -9,10 +9,12 @@ def test_rejects_unknown_host(client):
 
 def test_security_headers_present(client):
     r = client.get("/api/health")
-    assert r.headers["X-Frame-Options"] == "DENY"
     assert r.headers["X-Content-Type-Options"] == "nosniff"
     assert r.headers["Referrer-Policy"] == "no-referrer"
-    assert "frame-ancestors 'none'" in r.headers["Content-Security-Policy"]
+    # D45: iframe só no próprio Painel e no hub pessoal (localhost:8100); X-Frame-Options sai porque não libera uma
+    # origem só, e o frame-ancestors do CSP é quem decide
+    assert "X-Frame-Options" not in r.headers
+    assert "frame-ancestors 'self' http://localhost:8100 http://127.0.0.1:8100;" in r.headers["Content-Security-Policy"]
 
 
 def test_llm_base_url_only_http(client):

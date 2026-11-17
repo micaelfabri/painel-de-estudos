@@ -1,6 +1,6 @@
 # SPEC — Painel de Estudos (painel-de-estudos)
 
-Version 1.8 · 13/11/2026 · Owner: (seu nome aqui) · Builder: Claude Code
+Version 1.10 · 17/11/2026 · Owner: (seu nome aqui) · Builder: Claude Code
 Bilingual file (DIRETRIZ_BILINGUE_v1): English first, Portuguese after. If they differ, the Portuguese prevails.
 
 ---
@@ -235,7 +235,43 @@ Data: new columns on `degree` (platform, course_type, url, course_status, start_
 
 ---
 
----
+### 19. Hub summary (14/11/2026)
+
+| # | Decision |
+|---|---|
+| D45 | **Personal hub.** A personal hub (a separate app on `localhost:8100`, in Docker) reads `GET /api/hub-summary` from its server and shows the Painel inside an iframe. The summary is read-only and college-only: `source`, `updated_at`, `state` (week hours and pending topics, never grades), `next_step` (the same next action as the home screen), `deadlines` (exams and deadlines of the next 30 days, `YYYY-MM-DD`) and `alerts` (at most 5: overdue retests, cards due today, an exam within 7 days, overdue deadlines). Missing data gives empty fields, never an error. Framing is allowed only for the Painel itself, `localhost:8100` and `127.0.0.1:8100` (CSP `frame-ancestors`; `X-Frame-Options` is dropped because it cannot allow one origin). `host.docker.internal` joins the default allowed hosts so the hub's container can reach the Painel; the port stays bound to `127.0.0.1`. |
+
+| Phase | Scope | Done when |
+|---|---|---|
+| H1 | D45 | The hub shows the Painel summary and the Painel inside its iframe; `/api/hub-summary` answers with an empty database |
+
+### 20. Version 1.8.2 (15/11/2026): fixes from real use
+
+| # | Decision |
+|---|---|
+| D46 | **Tasks.** "Trazer para hoje" skips a task ticked on a later day and a topic task whose topics are all done in the portal; "Montar o dia" does not add a topic task for topics already on today's list. Ticking a topic task asks whether to mark its topics as "Concluído no portal". Past days' tasks (done and not done) are listed in Histórico › Tarefas por dia (last 120 days). |
+| D47 | **Card do dia.** Due cards first (D37 order); with none due, the card reviewed longest ago, never yesterday's. |
+| D48 | **Topics and subjects.** A topic can be deleted only when it has no history (tests, cards, mistakes, retests, tasks, sessions, chat). Subject pickers in Provas e prazos show the semester; current semester first. Portal counters stay independent from the topic list. |
+
+### 21. Version 1.8.3 (16/11/2026): a task moves to the next day
+
+| # | Decision |
+|---|---|
+| D49 | **Move, don't duplicate.** "Passar para hoje" moves unfinished tasks: the old day keeps a trail (`carried_to`, shown as "passou para DD/MM") and no longer counts them as not done or pending; the task on the new day shows "começou em DD/MM" (first day of the chain). Adding the same task on a later day, by hand or with "Montar o dia", moves it the same way. Deleting the moved copy brings the old task back as pending. The migration links past duplicates (each not-done task to the next day with the same task), after a full backup in `data/backups`; nothing is deleted. |
+
+### 22. Version 1.9 (16/11/2026): whole-subject questions and semesters in review
+
+| # | Decision |
+|---|---|
+| D50 | **Questões da disciplina.** `POST /api/agent/question-sets/subject` mixes every topic of the subject: saved text when there is one, otherwise the linked Notion page read on the spot, read-only (1.9.1; topics sharing a page become one block; same text split as the mock exam, which reads them the same way), with no timer, and sends the subject's last 40 questions as "do not repeat" (prompt `generate_subject_questions.v1`). Attempt type `subject_mix`: outside the topic retest cycle (like the mock exam); each question keeps its topic, so mistakes go to "Revisar erros" by topic. Entry points: "Gerar questões" → Tema → "Disciplina inteira", Histórico (next to the mock exam) and Revisão. |
+| D51 | **Semestres em revisão.** New page Faculdade › Revisão (`GET /api/review`, optional `semester_id`). It lists college subjects marked passed or failed that still need review, grouped by semester, with four automatic reasons: **failed**; **not learned enough** (a topic in "rever" or the tests' average below `learned_threshold`); **passed but not consolidated** (tested topics without the 7-day retest, or unfixed mistakes); **passed but didn't see everything** (topics not done in the portal, or portal contents below the total). Each subject lists up to 8 topics to review with the reason and offers "Questões da disciplina". Nothing is typed by hand; nothing changes in the database. |
+
+### 23. Version 1.10 (17/11/2026): prints in the chat and tasks linked by topic id
+
+| # | Decision |
+|---|---|
+| D52 | **Prints in the agent chat.** Authorized by the owner: I can attach up to 3 images per message (PNG, JPG, WebP, GIF, up to 8 MB each), by the attach button or by pasting with Ctrl+V. They go **only to the local model** (the chat model chosen on screen; otherwise `vision_model`; otherwise the default model), reduced to 1280 px like the prints. The image is **not saved**: the saved conversation keeps only the text plus "[N imagem(ns) enviada(s)]". |
+| D53 | **Tasks linked by topic id.** A topic task stores the ids of all its topics (`checklist_item.topic_ids`), so renaming a topic no longer makes "Montar o dia" create a second task for the same topics. "Montar o dia" also skips a new study task for a subject that already has an open study task today. The migration fills `topic_ids` for existing tasks from the current titles (or the first topic when the text no longer matches). |
 
 ## PORTUGUÊS
 
@@ -464,3 +500,41 @@ Dados: colunas novas em `degree` (platform, course_type, url, course_status, sta
 | K1 | D38, D39: grupos da barra lateral, Meus cursos (abas por situação, resumo, cards de curso), Novo curso | Crio um curso com 9 módulos; ele aparece em "Fazendo" com 0% e não aparece no Painel da faculdade |
 | K2 | Página do curso: módulos e aulas, questões, cards e cronômetro por curso, D41, D42, D44 | Cronometro 20 min num módulo; conta em "Horas em cursos" e não na semana da faculdade; um teste numa aula aparece só em Cursos › Histórico |
 | K3 | Cursos › Histórico, Cards, Desempenho; chave do D40; ponte do D43 com a AAC | Um curso concluído que conta como AAC cria uma atividade de AAC com as horas dele, e o botão some |
+
+### 19. Resumo para o hub (14/11/2026)
+
+| # | Decisão |
+|---|---|
+| D45 | **Hub pessoal.** Um hub pessoal (outro app em `localhost:8100`, no Docker) lê `GET /api/hub-summary` pelo servidor dele e mostra o Painel dentro de um iframe. O resumo é só de leitura e só da faculdade: `source`, `updated_at`, `state` (horas da semana e temas pendentes, nunca notas), `next_step` (a mesma próxima ação da tela inicial), `deadlines` (provas e prazos dos próximos 30 dias, `AAAA-MM-DD`) e `alerts` (no máximo 5: retestes vencidos, cards para hoje, prova em até 7 dias, prazos passados). Dado que falta vira campo vazio, nunca erro. O iframe só é liberado para o próprio Painel, `localhost:8100` e `127.0.0.1:8100` (CSP `frame-ancestors`; o `X-Frame-Options` sai porque não libera uma origem só). `host.docker.internal` entra nos hosts permitidos por padrão para o contêiner do hub chegar ao Painel; a porta continua presa a `127.0.0.1`. |
+
+| Fase | Escopo | Pronto quando |
+|---|---|---|
+| H1 | D45 | O hub mostra o resumo do Painel e o Painel dentro do iframe; `/api/hub-summary` responde com o banco vazio |
+
+### 20. Versão 1.8.2 (15/11/2026): correções do uso real
+
+| # | Decisão |
+|---|---|
+| D46 | **Tarefas.** "Trazer para hoje" pula tarefa marcada num dia depois e tarefa de tema cujos temas já estão todos concluídos no portal; "Montar o dia" não cria tarefa de tema para temas que já estão na lista de hoje. Marcar uma tarefa de tema pergunta se marca os temas como "Concluído no portal". As tarefas dos dias passados (feitas e não feitas) ficam em Histórico › Tarefas por dia (últimos 120 dias). |
+| D47 | **Card do dia.** Primeiro os cards vencidos (ordem da D37); sem nenhum vencido, o card revisado há mais tempo, nunca o de ontem. |
+| D48 | **Temas e disciplinas.** Só dá para apagar tema sem histórico (testes, cards, erros, retestes, tarefas, sessões, conversa). As listas de disciplina em Provas e prazos mostram o semestre; o atual primeiro. Os contadores do portal continuam separados da lista de temas. |
+
+### 21. Versão 1.8.3 (16/11/2026): a tarefa vai para o outro dia
+
+| # | Decisão |
+|---|---|
+| D49 | **Passar, não duplicar.** "Passar para hoje" leva as tarefas não terminadas: o dia antigo fica com um rastro (`carried_to`, mostrado como "passou para DD/MM") e não conta mais como não feita nem pendente; a tarefa no dia novo mostra "começou em DD/MM" (o primeiro dia da cadeia). Acrescentar a mesma tarefa num dia depois, à mão ou pelo "Montar o dia", passa do mesmo jeito. Apagar a cópia levada faz a tarefa antiga voltar a ser pendente. A migração liga as duplicadas do passado (cada não feita ao próximo dia com a mesma tarefa), depois de uma cópia completa em `data/backups`; nada é apagado. |
+
+### 22. Versão 1.9 (16/11/2026): questões da disciplina inteira e semestres em revisão
+
+| # | Decisão |
+|---|---|
+| D50 | **Questões da disciplina.** `POST /api/agent/question-sets/subject` mistura todos os temas da disciplina: o texto salvo quando existe, senão a página do Notion ligada, lida na hora e só leitura (1.9.1; temas que dividem uma página viram um bloco só; mesma divisão de texto do simulado, que passa a ler do mesmo jeito), sem tempo, e manda as últimas 40 questões da disciplina como "não repetir" (prompt `generate_subject_questions.v1`). Tipo `subject_mix`: fora do ciclo de retestes dos temas (como o simulado); cada questão guarda o seu tema, então os erros vão para "Revisar erros" pelo tema. Entradas: "Gerar questões" → Tema → "Disciplina inteira", Histórico (ao lado do simulado) e Revisão. |
+| D51 | **Semestres em revisão.** Página nova Faculdade › Revisão (`GET /api/review`, `semester_id` opcional). Lista as disciplinas da faculdade marcadas como aprovadas ou reprovadas que ainda pedem revisão, por semestre, com quatro motivos automáticos: **não aprovado**; **não aprendeu o suficiente** (tema em "rever" ou média dos testes abaixo do `learned_threshold`); **aprovado, mas não consolidado** (temas testados sem o reteste de 7 dias ou erros não corrigidos); **aprovado, mas não viu tudo** (temas não concluídos no portal ou conteúdos do portal abaixo do total). Cada disciplina lista até 8 temas para rever, com o motivo, e oferece "Questões da disciplina". Nada é digitado à mão; nada muda no banco. |
+
+### 23. Versão 1.10 (17/11/2026): prints na conversa e tarefas ligadas pelo id do tema
+
+| # | Decisão |
+|---|---|
+| D52 | **Prints na conversa com o agente.** Autorizado pelo dono: posso anexar até 3 imagens por mensagem (PNG, JPG, WebP, GIF, até 8 MB cada), pelo botão de anexo ou colando com Ctrl+V. Elas vão **só para o modelo local** (o modelo da conversa escolhido na tela; senão o `vision_model`; senão o padrão), reduzidas para 1280 px como os prints. A imagem **não fica salva**: a conversa salva guarda só o texto mais "[N imagem(ns) enviada(s)]". |
+| D53 | **Tarefas ligadas pelo id do tema.** A tarefa de tema guarda os ids de todos os seus temas (`checklist_item.topic_ids`), então renomear um tema não faz mais o "Montar o dia" criar uma segunda tarefa para os mesmos temas. O "Montar o dia" também não cria nova tarefa de estudo para uma disciplina que já tem tarefa de estudo aberta hoje. A migração preenche `topic_ids` das tarefas que já existem pelos títulos atuais (ou o primeiro tema, quando o texto não bate mais). |

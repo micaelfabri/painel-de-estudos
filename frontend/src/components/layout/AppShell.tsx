@@ -4,6 +4,7 @@ import {
   BarChart3,
   BookOpen,
   CalendarClock,
+  ClipboardCheck,
   GraduationCap,
   HelpCircle,
   History,
@@ -45,6 +46,8 @@ const STUDY_GROUPS: { label: string; items: NavItem[] }[] = [
       { to: "/estudo/historico", label: "Histórico", icon: History },
       { to: "/estudo/cards", label: "Cards", icon: Layers },
       { to: "/estudo/desempenho", label: "Desempenho", icon: BarChart3 },
+      // v1.9 (D51): disciplinas encerradas que pedem revisão
+      { to: "/estudo/revisao", label: "Revisão", icon: ClipboardCheck },
     ],
   },
   {

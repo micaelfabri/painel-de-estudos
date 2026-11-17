@@ -1,9 +1,11 @@
 import { Check, ListPlus, Pencil, Plus, Trash2, X } from "lucide-react";
 import * as React from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { CheckboxRow } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { api, type ChecklistItem, type ReviewDue } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
@@ -26,6 +28,8 @@ export function DailyChecklist() {
   const [announce, setAnnounce] = React.useState("");
   const [editingId, setEditingId] = React.useState<number | null>(null);
   const [draft, setDraft] = React.useState("");
+  // v1.8.2: tarefa de tema marcada: pergunta se marca os temas como concluídos no portal
+  const [askTopics, setAskTopics] = React.useState<{ item: ChecklistItem; titles: string[] } | null>(null);
   const day = todayIso();
 
   const load = React.useCallback(async () => {
@@ -51,7 +55,22 @@ export function DailyChecklist() {
     } catch {
       setItems((list) => list.map((i) => (i.id === item.id ? { ...i, done: !done } : i)));
       toast.error("Não foi possível marcar a tarefa.");
+      return;
     }
+    if (done && item.topic_id) {
+      const topics = await api
+        .get<{ id: number; title: string; portal_done: boolean }[]>(`/learning/checklist/${item.id}/topics`)
+        .catch(() => []);
+      const open = topics.filter((t) => !t.portal_done).map((t) => t.title);
+      if (open.length) setAskTopics({ item, titles: open });
+    }
+  };
+
+  const markTopics = async () => {
+    if (!askTopics) return;
+    const out = await api.post<{ marked: string[] }>(`/learning/checklist/${askTopics.item.id}/topics-done`, {});
+    toast.success(`Concluído no portal: ${out.marked.join(", ")}`);
+    void load();
   };
 
   // v1.3 (D19): corrigir o nome de uma tarefa (ex.: temas errados) ou tirar da lista
@@ -145,7 +164,7 @@ export function DailyChecklist() {
             {pending.length === 1 ? "1 tarefa não feita" : `${pending.length} tarefas não feitas`} de dias anteriores.
           </span>
           <Button variant="link" size="sm" className="h-auto px-0" onClick={carry}>
-            Trazer para hoje
+            Passar para hoje
           </Button>
         </p>
       )}
@@ -244,6 +263,25 @@ export function DailyChecklist() {
       <div aria-live="polite" className="sr-only">
         {announce}
       </div>
+      <Link
+        to="/estudo/historico#tarefas"
+        className={cn(buttonVariants({ variant: "link", size: "sm" }), "h-auto px-0")}
+      >
+        Ver as tarefas dos outros dias
+      </Link>
+      <ConfirmDialog
+        open={askTopics !== null}
+        onOpenChange={(o) => !o && setAskTopics(null)}
+        title="Marcar os temas como concluídos?"
+        note={
+          askTopics
+            ? `${askTopics.titles.join(", ")} passa(m) para "Concluído no portal" e sai(em) das próximas sugestões do "Montar o dia".`
+            : undefined
+        }
+        confirmLabel="Marcar como concluídos"
+        cancelLabel="Agora não"
+        onConfirm={markTopics}
+      />
       <form onSubmit={add} className="flex gap-2">
         <label htmlFor="chk-new" className="sr-only">
           Nova tarefa

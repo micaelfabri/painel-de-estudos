@@ -356,6 +356,10 @@ class ChecklistItem(TimestampMixin, Base):
     review_id: Mapped[int | None] = mapped_column(ForeignKey("review_schedule.id", ondelete="CASCADE"))
     done: Mapped[bool] = mapped_column(Boolean, default=False)
     position: Mapped[int] = mapped_column(Integer, default=0)
+    # v1.8.3 (D49): não feita aqui e passada para outro dia (o rastro fica; não conta mais como pendente)
+    carried_to: Mapped[date | None] = mapped_column(Date)
+    # v1.10 (D53): todos os temas da tarefa, pelo id (renomear um tema não desfaz a ligação)
+    topic_ids: Mapped[list | None] = mapped_column(JSON)
 
 
 # --- ACC ---------------------------------------------------------------------

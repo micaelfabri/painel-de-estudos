@@ -1,10 +1,11 @@
-import { ArrowDown, Loader2, Send, Trash2 } from "lucide-react";
+import { ArrowDown, ImagePlus, Loader2, Send, Trash2, X } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { fieldClass } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { useAgent } from "./AgentContext";
 
 /** Linha "Pensando…": segundos depois de 5 s, Cancelar depois de 10 s (DS v2.13) */
@@ -107,6 +108,18 @@ export function MessageList({
               key={e.id}
               className="max-w-[85%] self-end whitespace-pre-wrap rounded-xl bg-accent px-3 py-2 text-sm text-accent-foreground"
             >
+              {e.images && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {e.images.map((src, i) => (
+                    <img
+                      key={i}
+                      src={src}
+                      alt={`Imagem ${i + 1} enviada`}
+                      className="h-20 w-20 rounded-md border border-border object-cover"
+                    />
+                  ))}
+                </div>
+              )}
               {e.text}
             </div>
           ) : (
@@ -151,10 +164,26 @@ export function MessageList({
 }
 
 /** Entrada: Textarea até 6 linhas, Enter envia, Shift+Enter quebra linha */
+const MAX_IMAGES = 3;
+const MAX_BYTES = 8 * 1024 * 1024;
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 export function ChatInput() {
   const { sendChat, pending } = useAgent();
   const [value, setValue] = React.useState("");
+  // v1.10 (D52): prints por anexo ou colados com Ctrl+V; vão só ao modelo local
+  const [images, setImages] = React.useState<string[]>([]);
   const ref = React.useRef<HTMLTextAreaElement>(null);
+  const fileRef = React.useRef<HTMLInputElement>(null);
 
   React.useLayoutEffect(() => {
     const el = ref.current;
@@ -164,42 +193,115 @@ export function ChatInput() {
     el.style.height = `${Math.min(el.scrollHeight, line * 6 + 16)}px`;
   }, [value]);
 
+  const addFiles = async (files: File[]) => {
+    const ok = files.filter((f) => IMAGE_TYPES.includes(f.type));
+    if (ok.length < files.length) toast.error("Só dá para mandar imagens (PNG, JPG, WebP ou GIF).");
+    const small = ok.filter((f) => f.size <= MAX_BYTES);
+    if (small.length < ok.length) toast.error("Imagem grande demais (máximo 8 MB).");
+    const room = MAX_IMAGES - images.length;
+    if (small.length > room) toast.error(`No máximo ${MAX_IMAGES} imagens por mensagem.`);
+    const urls = await Promise.all(small.slice(0, Math.max(room, 0)).map(readAsDataUrl));
+    if (urls.length) setImages((list) => [...list, ...urls].slice(0, MAX_IMAGES));
+  };
+
   const send = () => {
-    const text = value.trim();
+    const text = value.trim() || (images.length ? "Veja a imagem." : "");
     if (!text || pending) return;
-    sendChat(text);
+    sendChat(text, images);
     setValue("");
+    setImages([]);
   };
 
   return (
     <form
-      className="flex items-end gap-2"
+      className="space-y-2"
       onSubmit={(e) => {
         e.preventDefault();
         send();
       }}
     >
-      <label htmlFor="agent-input" className="sr-only">
-        Mensagem para o agente
-      </label>
-      <textarea
-        id="agent-input"
-        ref={ref}
-        rows={1}
-        value={value}
-        placeholder="Pergunte algo sobre o tema…"
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            send();
-          }
-        }}
-        className={cn(fieldClass, "h-auto min-h-11 resize-none sm:h-auto sm:min-h-9")}
-      />
-      <Button type="submit" size="icon" aria-label="Enviar" disabled={!value.trim() || pending !== null}>
-        <Send aria-hidden="true" />
-      </Button>
+      {images.length > 0 && (
+        <ul className="flex flex-wrap gap-2" aria-label="Imagens para enviar">
+          {images.map((src, i) => (
+            <li key={i} className="relative">
+              <img
+                src={src}
+                alt={`Imagem ${i + 1} para enviar`}
+                className="h-16 w-16 rounded-md border border-border object-cover"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="absolute -right-2 -top-2 h-6 w-6 rounded-full sm:h-6 sm:w-6"
+                aria-label={`Remover imagem ${i + 1}`}
+                onClick={() => setImages((list) => list.filter((_, j) => j !== i))}
+              >
+                <X aria-hidden="true" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex items-end gap-2">
+        <input
+          ref={fileRef}
+          type="file"
+          accept={IMAGE_TYPES.join(",")}
+          multiple
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(e) => {
+            void addFiles(Array.from(e.target.files ?? []));
+            e.target.value = "";
+          }}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Anexar imagem"
+          title="Anexar imagem (ou cole com Ctrl+V)"
+          disabled={images.length >= MAX_IMAGES || pending !== null}
+          onClick={() => fileRef.current?.click()}
+        >
+          <ImagePlus aria-hidden="true" />
+        </Button>
+        <label htmlFor="agent-input" className="sr-only">
+          Mensagem para o agente
+        </label>
+        <textarea
+          id="agent-input"
+          ref={ref}
+          rows={1}
+          value={value}
+          placeholder="Pergunte algo sobre o tema…"
+          onChange={(e) => setValue(e.target.value)}
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+            if (files.length) {
+              e.preventDefault();
+              void addFiles(files);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              send();
+            }
+          }}
+          className={cn(fieldClass, "h-auto min-h-11 resize-none sm:h-auto sm:min-h-9")}
+        />
+        <Button
+          type="submit"
+          size="icon"
+          aria-label="Enviar"
+          disabled={(!value.trim() && images.length === 0) || pending !== null}
+        >
+          <Send aria-hidden="true" />
+        </Button>
+      </div>
     </form>
   );
 }
