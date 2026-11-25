@@ -1,7 +1,5 @@
 # CLAUDE.md — Painel de Estudos
 
-Bilingual file (DIRETRIZ_BILINGUE_v1): English first, Portuguese after. If they differ, the Portuguese prevails.
-
 ---
 
 ## ENGLISH
@@ -14,7 +12,7 @@ A local study panel + local study agent for its owner. Full scope, decisions and
 2. One phase at a time (F0 → F7). Don't start the next phase without the owner's OK.
 3. Scope guard: build only what `SPEC.md` lists. Ideas outside it go to an ideas list (e.g. `docs/IDEIAS.md`), not into code.
 4. Before changing or deleting any existing file, list what will change and wait for the OK.
-5. Answers to the owner: bilingual, English first, then Portuguese with the same content.
+5. Answers in Portuguese; English only when the owner asks.
 6. Code comments: Portuguese (pt-BR). Identifiers in English.
 7. Commits: 100% English (subject and body). Push only to `claude/*` branches, one pull request per phase; merging into `main` is the owner's.
 8. After each phase: run the app, check the "done when" line of the phase, report what was verified and how.
@@ -60,7 +58,7 @@ Um painel de estudos local + agente de estudos local para o dono. Escopo complet
 2. Uma fase por vez (F0 → F7). Não começar a próxima fase sem o OK do dono.
 3. Guarda de escopo: construir só o que o `SPEC.md` lista. Ideias fora dele vão para uma lista de ideias (ex.: `docs/IDEIAS.md`), não para o código.
 4. Antes de alterar ou apagar qualquer arquivo existente, listar o que vai mudar e esperar o OK.
-5. Respostas ao dono: bilíngues, inglês primeiro, depois português com o mesmo conteúdo.
+5. Respostas em português; inglês só quando o dono pedir.
 6. Comentários de código: português (pt-BR). Identificadores em inglês.
 7. Commits: 100% em inglês (assunto e corpo). Push só em branches `claude/*`, um pull request por fase; o merge no `main` é do dono.
 8. Ao fim de cada fase: rodar o app, conferir a linha "pronto quando" da fase e relatar o que foi verificado e como.
